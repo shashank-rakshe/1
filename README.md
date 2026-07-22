@@ -26,7 +26,14 @@ python main.py
   second, then run the operation.
 - **Pull/Push** — toggle the tool, click a planar face, enter a distance
   (positive pulls material out, negative pushes it in).
-- **Open STEP... / Save STEP...** — import/export `.step`/`.stp` files.
+- **Fillet / Chamfer** — toggle the tool, click an edge, enter a radius/distance.
+- **Move / Rotate / Copy** — select one solid, then run the tool and enter
+  the offset/angle (Rotate is about the Z axis through the origin in v1).
+- **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
+- **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
+  any real CAD tool, including SpaceClaim's own STEP export).
+- **Open/Save Project...** — this tool's own `.dcadproj` format (a zip of
+  BREP geometry + a name manifest). Not SpaceClaim's `.scdoc` — see Status.
 - Mouse: left-drag to orbit, middle/right-drag to pan, wheel to zoom.
 
 ## Tests
@@ -37,7 +44,8 @@ PYTHONPATH=src pytest tests/test_kernel.py
 ```
 
 `tests/smoke_gui.py` exercises the full app (primitives, booleans, pull/push,
-STEP round-trip) end-to-end; on Linux without a display, run it under Xvfb:
+fillet/chamfer, move/rotate/copy, undo/redo, STEP and project round-trips)
+end-to-end; on Linux without a display, run it under Xvfb:
 
 ```
 xvfb-run -a python3 tests/smoke_gui.py
@@ -47,18 +55,21 @@ xvfb-run -a python3 tests/smoke_gui.py
 
 ```
 src/dcad/
-  kernel/     # geometry: primitives, booleans, direct-edit, STEP/IGES I/O
+  kernel/     # geometry: primitives, booleans, direct-edit, fillet/chamfer,
+              # transform, STEP/IGES I/O, native project I/O, document/undo
   viewport/   # OCCT viewer embedded in a Qt widget (camera, picking)
   ui/         # MainWindow / toolbar
 ```
 
 ## Status
 
-Working: primitive creation, boolean ops, planar-face pull/push, STEP/IGES
-import-export, orbit/pan/zoom viewport with solid/face picking.
+Working: primitive creation, boolean ops, planar-face pull/push,
+fillet/chamfer, move/rotate/copy, undo/redo, STEP/IGES import-export,
+native project save/load, orbit/pan/zoom viewport with solid/face/edge
+picking.
 
-Not yet built (real SpaceClaim features, prioritized on request): sketch-based
-extrude/revolve, fillets/chamfers, assemblies, sheet metal, drawings.
+Not yet built (real SpaceClaim features, in progress): sketch-based
+extrude/revolve, assemblies, sheet metal, drawings, measurement tools.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 Siemens format — no open reader exists); a Parasolid kernel (commercial,
