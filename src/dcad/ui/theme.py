@@ -17,14 +17,14 @@ QMainWindow {{
     background: {RIBBON_BG};
 }}
 
-#ribbonFileButton {{
+QToolButton#ribbonFileButton {{
     background: {ACCENT};
     color: white;
     font-weight: 600;
     padding: 6px 14px;
     border: none;
 }}
-#ribbonFileButton:hover {{
+QToolButton#ribbonFileButton:hover {{
     background: #0E75C8;
 }}
 

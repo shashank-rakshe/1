@@ -81,6 +81,7 @@ class RibbonBar(QWidget):
 
         self.file_button = QToolButton(self)
         self.file_button.setText("File")
+        self.file_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.file_button.setObjectName("ribbonFileButton")
         self.file_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         header_layout.addWidget(self.file_button)
