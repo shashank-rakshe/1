@@ -2,11 +2,14 @@
 
 from PySide6.QtWidgets import (
     QMainWindow,
-    QToolBar,
     QFileDialog,
     QInputDialog,
     QMessageBox,
     QStatusBar,
+    QMenu,
+    QDockWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
@@ -15,6 +18,8 @@ from dcad.kernel.document import Document
 from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
+from dcad.ui.ribbon import RibbonBar
+from dcad.ui.theme import STYLESHEET
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
 
@@ -56,81 +61,136 @@ class MainWindow(QMainWindow):
         self._interactive_sketch_shape_ids = []
         self.sketch_entity_actions = {}
 
-        self._build_toolbar()
+        self.setStyleSheet(STYLESHEET)
+        self._build_ribbon()
+        self._build_structure_tree()
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage("Ready")
 
-    # -- toolbar -----------------------------------------------------
-    def _build_toolbar(self):
-        tb = QToolBar("Main", self)
-        tb.setMovable(False)
-        self.addToolBar(tb)
+    # -- ribbon -----------------------------------------------------
+    def _build_ribbon(self):
+        self.ribbon = RibbonBar(self)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self._wrap_in_toolbar(self.ribbon))
 
-        tb.addAction(self._action("Box", self.add_box))
-        tb.addAction(self._action("Cylinder", self.add_cylinder))
-        tb.addAction(self._action("Sphere", self.add_sphere))
-        tb.addSeparator()
+        file_menu = QMenu(self.ribbon.file_button)
+        file_menu.addAction(self._action("Open STEP...", self.open_step))
+        file_menu.addAction(self._action("Save STEP...", self.save_step))
+        file_menu.addSeparator()
+        file_menu.addAction(self._action("Open Project...", self.open_project))
+        file_menu.addAction(self._action("Save Project...", self.save_project))
+        self.ribbon.file_button.setMenu(file_menu)
 
-        tb.addAction(self._action("Sketch Rect+Extrude", self.do_sketch_rect_extrude))
-        tb.addAction(self._action("Sketch Circle+Extrude", self.do_sketch_circle_extrude))
-        tb.addAction(self._action("Sketch Revolve", self.do_sketch_revolve))
-        tb.addSeparator()
-        tb.addAction(self._action("Union", self.do_union))
-        tb.addAction(self._action("Subtract", self.do_subtract))
-        tb.addAction(self._action("Intersect", self.do_intersect))
-        tb.addSeparator()
+        design_tab = self.ribbon.add_tab("Design")
 
-        tb.addAction(self._tool_action("pull", "Pull/Push"))
-        tb.addAction(self._tool_action("fillet", "Fillet"))
-        tb.addAction(self._tool_action("chamfer", "Chamfer"))
-        tb.addSeparator()
+        select_group = design_tab.add_group("Select")
+        select_group.add_action(self._action("Select", self.select_tool))
 
-        tb.addAction(self._action("Move", self.do_move))
-        tb.addAction(self._action("Rotate", self.do_rotate))
-        tb.addAction(self._action("Copy", self.do_copy))
-        tb.addSeparator()
+        create_group = design_tab.add_group("Create")
+        create_group.add_action(self._action("Box", self.add_box))
+        create_group.add_action(self._action("Cylinder", self.add_cylinder))
+        create_group.add_action(self._action("Sphere", self.add_sphere))
 
-        undo_action = self._action("Undo", self.undo)
-        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        tb.addAction(undo_action)
-        redo_action = self._action("Redo", self.redo)
-        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
-        tb.addAction(redo_action)
-        tb.addSeparator()
+        edit_group = design_tab.add_group("Edit")
+        edit_group.add_action(self._tool_action("pull", "Pull"))
+        edit_group.add_action(self._action("Move", self.do_move))
+        edit_group.add_action(self._action("Rotate", self.do_rotate))
+        edit_group.add_action(self._action("Copy", self.do_copy))
 
-        tb.addAction(self._action("Open STEP...", self.open_step))
-        tb.addAction(self._action("Save STEP...", self.save_step))
-        tb.addAction(self._action("Open Project...", self.open_project))
-        tb.addAction(self._action("Save Project...", self.save_project))
-        tb.addSeparator()
-        tb.addAction(self._action("Fit All", self.viewport.fit_all))
+        combine_group = design_tab.add_group("Combine")
+        combine_group.add_action(self._action("Merge", self.do_union))
+        combine_group.add_action(self._action("Subtract", self.do_subtract))
+        combine_group.add_action(self._action("Intersect", self.do_intersect))
 
-        self.addToolBarBreak()
-        sketch_tb = QToolBar("Interactive Sketch", self)
-        sketch_tb.setMovable(False)
-        self.addToolBar(sketch_tb)
+        construct_group = design_tab.add_group("Construct")
+        construct_group.add_action(self._tool_action("fillet", "Fillet"))
+        construct_group.add_action(self._tool_action("chamfer", "Chamfer"))
 
-        self.sketch_extrude_action = QAction("Sketch (Extrude)", self)
+        sketch_mode_group = design_tab.add_group("Sketch Mode")
+        self.sketch_extrude_action = QAction("Extrude\nPlane", self)
         self.sketch_extrude_action.setCheckable(True)
         self.sketch_extrude_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("extrude", checked))
-        sketch_tb.addAction(self.sketch_extrude_action)
+        sketch_mode_group.add_action(self.sketch_extrude_action)
 
-        self.sketch_revolve_action = QAction("Sketch (Revolve)", self)
+        self.sketch_revolve_action = QAction("Revolve\nPlane", self)
         self.sketch_revolve_action.setCheckable(True)
         self.sketch_revolve_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("revolve", checked))
-        sketch_tb.addAction(self.sketch_revolve_action)
-        sketch_tb.addSeparator()
+        sketch_mode_group.add_action(self.sketch_revolve_action)
 
+        numeric_sketch_group = design_tab.add_group("Sketch (typed)")
+        numeric_sketch_group.add_action(self._action("Rectangle\n+ Extrude", self.do_sketch_rect_extrude))
+        numeric_sketch_group.add_action(self._action("Circle\n+ Extrude", self.do_sketch_circle_extrude))
+        numeric_sketch_group.add_action(self._action("Revolve", self.do_sketch_revolve))
+
+        history_group = design_tab.add_group("History")
+        undo_action = self._action("Undo", self.undo)
+        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        history_group.add_action(undo_action)
+        redo_action = self._action("Redo", self.redo)
+        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        history_group.add_action(redo_action)
+
+        view_group = design_tab.add_group("View")
+        view_group.add_action(self._action("Fit All", self.viewport.fit_all))
+
+        sketch_tab = self.ribbon.add_tab("Sketch")
+        draw_group = sketch_tab.add_group("Draw")
         for name, label in [("line", "Line"), ("rect", "Rectangle"), ("circle", "Circle")]:
             action = QAction(label, self)
             action.setCheckable(True)
             action.toggled.connect(lambda checked, n=name: self._on_sketch_entity_toggled(n, checked))
             self.sketch_entity_actions[name] = action
-            sketch_tb.addAction(action)
-        sketch_tb.addSeparator()
+            draw_group.add_action(action)
 
-        sketch_tb.addAction(self._action("Finish Sketch", self.finish_interactive_sketch))
-        sketch_tb.addAction(self._action("Cancel Sketch", self.cancel_interactive_sketch))
+        finish_group = sketch_tab.add_group("Sketch")
+        finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch))
+        finish_group.add_action(self._action("Cancel Sketch", self.cancel_interactive_sketch))
+
+        self.ribbon.set_current_tab(0)
+
+    def _wrap_in_toolbar(self, widget):
+        from PySide6.QtWidgets import QToolBar
+
+        tb = QToolBar("Ribbon", self)
+        tb.setMovable(False)
+        tb.setFloatable(False)
+        tb.addWidget(widget)
+        return tb
+
+    def select_tool(self):
+        for action in self._tool_actions.values():
+            if action.isChecked():
+                action.setChecked(False)
+        if self.interactive_sketch_active:
+            self._exit_interactive_sketch()
+        self.viewport.clear_selection()
+        self.statusBar().showMessage("Ready")
+
+    # -- structure tree -----------------------------------------------
+    def _build_structure_tree(self):
+        dock = QDockWidget("Structure", self)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self.structure_tree = QTreeWidget(dock)
+        self.structure_tree.setHeaderHidden(True)
+        self.structure_tree.itemClicked.connect(self._on_structure_item_clicked)
+        dock.setWidget(self.structure_tree)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        self._refresh_structure_tree()
+
+    def _refresh_structure_tree(self):
+        self.structure_tree.clear()
+        for obj in self.document.objects:
+            item = QTreeWidgetItem([obj.name])
+            item.setData(0, Qt.ItemDataRole.UserRole, obj.id)
+            self.structure_tree.addTopLevelItem(item)
+
+    def _on_structure_item_clicked(self, item, _column):
+        shape_id = item.data(0, Qt.ItemDataRole.UserRole)
+        ais = self.viewport.viewer.ais_for(shape_id)
+        if ais is None:
+            return
+        self.viewport.clear_selection()
+        self.viewport.viewer.context.AddOrRemoveSelected(ais, True)
+        self.viewport.update()
 
     def _action(self, label: str, slot) -> QAction:
         action = QAction(label, self)
@@ -184,8 +244,13 @@ class MainWindow(QMainWindow):
         obj = self.document.add(shape, name=name)
         self.viewport.viewer.display_shape(obj.id, shape)
         self.viewport.fit_all()
+        self._refresh_structure_tree()
         self.statusBar().showMessage(f"Added {obj.name}")
         return obj
+
+    def _sync_viewport(self):
+        self.viewport.update()
+        self._refresh_structure_tree()
 
     # -- booleans --------------------------------------------------------
     def _selected_pair(self):
@@ -222,7 +287,7 @@ class MainWindow(QMainWindow):
         self.document.remove(b)
         new_obj = self.document.add(result, name=f"{label}Result")
         self.viewport.viewer.display_shape(new_obj.id, result)
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(f"{label} complete -> {new_obj.name}")
 
     def do_union(self):
@@ -333,6 +398,7 @@ class MainWindow(QMainWindow):
             normal = self._current_sketch_normal()
             self.viewport.viewer.set_sketch_plane(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(*normal)))
             self.sketch_entity_actions["rect"].setChecked(True)
+            self.ribbon.set_current_tab(1)
             self.statusBar().showMessage(f"Sketch ({mode}): choose Line/Rectangle/Circle, then click points in the viewport")
         elif self.interactive_sketch_active and self.interactive_sketch_finish_mode == mode:
             self._exit_interactive_sketch()
@@ -368,7 +434,7 @@ class MainWindow(QMainWindow):
         except Exception:
             preview = None  # degenerate in-progress geometry (e.g. zero-size); just skip the preview
         self.viewport.viewer.set_preview(preview)
-        self.viewport.update()
+        self._sync_viewport()
 
     def _on_sketch_clicked(self, x: float, y: float, z: float):
         if not self.interactive_sketch_active or not self.interactive_sketch_tool:
@@ -409,7 +475,7 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.display_shape(temp_id, face)
         self.viewport.viewer.set_preview(None)
         self.interactive_sketch_points = []
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(
             f"Sketch: {len(self.interactive_sketch_profiles)} profile(s) placed — add more or Finish Sketch"
         )
@@ -430,7 +496,8 @@ class MainWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(False)
             action.blockSignals(False)
-        self.viewport.update()
+        self.ribbon.set_current_tab(0)
+        self._sync_viewport()
         self.statusBar().showMessage("Ready")
 
     def cancel_interactive_sketch(self):
@@ -491,7 +558,7 @@ class MainWindow(QMainWindow):
         new_shape = transform.translate(obj.shape, *offset)
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(f"Moved {obj.name}")
 
     def do_rotate(self):
@@ -505,7 +572,7 @@ class MainWindow(QMainWindow):
         new_shape = transform.rotate(obj.shape, angle)
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(f"Rotated {obj.name} by {angle:g} deg")
 
     def do_copy(self):
@@ -525,7 +592,7 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.clear_all()
         for obj in self.document.objects:
             self.viewport.viewer.display_shape(obj.id, obj.shape)
-        self.viewport.update()
+        self._sync_viewport()
 
     def undo(self):
         if self.document.undo():
@@ -573,7 +640,7 @@ class MainWindow(QMainWindow):
         self.document.snapshot()
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(f"Pulled {obj.name} by {distance:g}")
 
     def _apply_edge_op(self, obj, edge, tool: str):
@@ -592,7 +659,7 @@ class MainWindow(QMainWindow):
         self.document.snapshot()
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
-        self.viewport.update()
+        self._sync_viewport()
         self.statusBar().showMessage(f"{tool.capitalize()}ed {obj.name} by {value:g}")
 
     # -- file I/O ------------------------------------------------------
