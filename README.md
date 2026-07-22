@@ -21,12 +21,12 @@ python main.py
 
 ## UI
 
-A ribbon (Design/Sketch/Inspect tabs, labeled button groups, a File menu)
-plus a Structure tree on the left listing every solid — click a tree item to
-select it in the viewport. This matches SpaceClaim's actual UI *paradigm* and
-terminology (Pull, Merge, Combine, Sketch Mode, Inspect); it is not a pixel
-copy of SpaceClaim's artwork or branding, which are Siemens' proprietary
-assets.
+A ribbon (Design/Sketch/Inspect/Repair/Prepare tabs, labeled button groups,
+a File menu) plus a Structure tree on the left listing every solid — click a
+tree item to select it in the viewport. This matches SpaceClaim's actual UI
+*paradigm* and terminology (Pull, Merge, Combine, Sketch Mode, Inspect,
+Repair, Prepare); it is not a pixel copy of SpaceClaim's artwork or
+branding, which are ANSYS's proprietary assets.
 
 ## Using the app
 
@@ -55,6 +55,17 @@ assets.
   coordinates instead of clicking.
 - **Measure** (Inspect tab) — click a face to see its area, click a second
   face to see the distance between them.
+- **Repair tab** — **Stitch**: select 2+ disjoint faces/surfaces, sews them
+  into one solid if watertight. **Fill**: toggle the tool, click a face to
+  remove it and heal the surrounding geometry (undo a fillet/chamfer/
+  protrusion). **Merge Faces**: select one solid, unifies faces on the same
+  underlying surface and removes the redundant edges between them.
+- **Prepare tab** — **Interference**: reports every pair of solids in the
+  document whose volumes overlap. **Enclosure**: select solid(s), enter a
+  margin, builds the surrounding void as a new solid (e.g. a CFD domain).
+  **Share Topology**: select 2+ touching solids, matches their contact-
+  face/edge topology while keeping them as separate solids (unlike
+  Merge/Combine, which welds them into one).
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -95,9 +106,10 @@ Working: primitive creation, boolean ops, planar-face pull/push,
 fillet/chamfer, move/rotate/copy, undo/redo, interactive click-to-sketch
 drawing (Line/Rectangle/Circle/Polygon/Ellipse/3-Point Circle/3-Point Arc)
 plus a dialog-based alternative, sketch extrude and revolve, measure
-(distance/length/area/volume), STEP/IGES import-export, native project
-save/load, a ribbon UI with original icons and a Structure tree,
-orbit/pan/zoom viewport with solid/face/edge picking. 53 kernel tests + a
+(distance/length/area/volume), Repair (Stitch/Fill/Merge Faces), Prepare
+(Interference/Enclosure/Share Topology), STEP/IGES import-export, native
+project save/load, a ribbon UI with original icons and a Structure tree,
+orbit/pan/zoom viewport with solid/face/edge picking. 64 kernel tests + a
 full end-to-end GUI smoke test (including real synthesized mouse clicks)
 cover all of it.
 
@@ -109,15 +121,15 @@ it's what separates "click to draw" from a true parametric sketcher.
 
 SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Measure,
 Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal, Tools,
-Display, Keyshot). This project covers the core CAD-modeling ones
-(Design/Sketch/Measure, here "Inspect"). Not yet built: Repair (Fill —
-heal a removed face by extending its neighbors), Assembly (multi-part),
-Detail (2D drawings), Sheet Metal, sketch constraints. Out of scope:
-Facets/Mesh/Workbench (ANSYS's simulation pipeline) and Keyshot (a
-separate third-party renderer) — those aren't CAD modeling.
+Display, Keyshot). This project now covers Design/Sketch/Measure/Repair/
+Prepare (Measure+Prepare shown as "Inspect"+"Prepare" here). Not yet
+built: Assembly (multi-part, mates), Detail (2D drawings), Sheet Metal,
+sketch constraints. Out of scope: Facets/Mesh/Workbench (ANSYS's
+simulation pipeline) and Keyshot (a separate third-party renderer) —
+those aren't CAD modeling.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
-Siemens format — no open reader exists); a Parasolid kernel (commercial,
+ANSYS format — no open reader exists); a Parasolid kernel (commercial,
 license-only). Use STEP/IGES as the exchange format instead.
 
 ## Packaging as an executable
