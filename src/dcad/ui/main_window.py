@@ -20,6 +20,7 @@ from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
 from dcad.ui.theme import STYLESHEET
+from dcad.ui import icons
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
 
@@ -76,65 +77,67 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self._wrap_in_toolbar(self.ribbon))
 
         file_menu = QMenu(self.ribbon.file_button)
-        file_menu.addAction(self._action("Open STEP...", self.open_step))
-        file_menu.addAction(self._action("Save STEP...", self.save_step))
+        file_menu.addAction(self._action("Open STEP...", self.open_step, "file"))
+        file_menu.addAction(self._action("Save STEP...", self.save_step, "file"))
         file_menu.addSeparator()
-        file_menu.addAction(self._action("Open Project...", self.open_project))
-        file_menu.addAction(self._action("Save Project...", self.save_project))
+        file_menu.addAction(self._action("Open Project...", self.open_project, "file"))
+        file_menu.addAction(self._action("Save Project...", self.save_project, "file"))
         self.ribbon.file_button.setMenu(file_menu)
 
         design_tab = self.ribbon.add_tab("Design")
 
         select_group = design_tab.add_group("Select")
-        select_group.add_action(self._action("Select", self.select_tool))
+        select_group.add_action(self._action("Select", self.select_tool, "select"))
 
         create_group = design_tab.add_group("Create")
-        create_group.add_action(self._action("Box", self.add_box))
-        create_group.add_action(self._action("Cylinder", self.add_cylinder))
-        create_group.add_action(self._action("Sphere", self.add_sphere))
+        create_group.add_action(self._action("Box", self.add_box, "box"))
+        create_group.add_action(self._action("Cylinder", self.add_cylinder, "cylinder"))
+        create_group.add_action(self._action("Sphere", self.add_sphere, "sphere"))
 
         edit_group = design_tab.add_group("Edit")
-        edit_group.add_action(self._tool_action("pull", "Pull"))
-        edit_group.add_action(self._action("Move", self.do_move))
-        edit_group.add_action(self._action("Rotate", self.do_rotate))
-        edit_group.add_action(self._action("Copy", self.do_copy))
-        edit_group.add_action(self._action("Revolve", self.do_revolve_surface))
+        edit_group.add_action(self._tool_action("pull", "Pull", "pull"))
+        edit_group.add_action(self._action("Move", self.do_move, "move"))
+        edit_group.add_action(self._action("Rotate", self.do_rotate, "rotate"))
+        edit_group.add_action(self._action("Copy", self.do_copy, "copy"))
+        edit_group.add_action(self._action("Revolve", self.do_revolve_surface, "revolve"))
 
         combine_group = design_tab.add_group("Combine")
-        combine_group.add_action(self._action("Merge", self.do_union))
-        combine_group.add_action(self._action("Subtract", self.do_subtract))
-        combine_group.add_action(self._action("Intersect", self.do_intersect))
+        combine_group.add_action(self._action("Merge", self.do_union, "merge"))
+        combine_group.add_action(self._action("Subtract", self.do_subtract, "subtract"))
+        combine_group.add_action(self._action("Intersect", self.do_intersect, "intersect"))
 
         construct_group = design_tab.add_group("Construct")
-        construct_group.add_action(self._tool_action("fillet", "Fillet"))
-        construct_group.add_action(self._tool_action("chamfer", "Chamfer"))
+        construct_group.add_action(self._tool_action("fillet", "Fillet", "fillet"))
+        construct_group.add_action(self._tool_action("chamfer", "Chamfer", "chamfer"))
 
         sketch_mode_group = design_tab.add_group("Sketch Mode")
         self.sketch_extrude_action = QAction("Extrude\nPlane", self)
+        self.sketch_extrude_action.setIcon(icons.get("sketch_extrude_plane"))
         self.sketch_extrude_action.setCheckable(True)
         self.sketch_extrude_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("extrude", checked))
         sketch_mode_group.add_action(self.sketch_extrude_action)
 
         self.sketch_revolve_action = QAction("Revolve\nPlane", self)
+        self.sketch_revolve_action.setIcon(icons.get("sketch_revolve_plane"))
         self.sketch_revolve_action.setCheckable(True)
         self.sketch_revolve_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("revolve", checked))
         sketch_mode_group.add_action(self.sketch_revolve_action)
 
         numeric_sketch_group = design_tab.add_group("Sketch (typed)")
-        numeric_sketch_group.add_action(self._action("Rectangle\n+ Extrude", self.do_sketch_rect_extrude))
-        numeric_sketch_group.add_action(self._action("Circle\n+ Extrude", self.do_sketch_circle_extrude))
-        numeric_sketch_group.add_action(self._action("Revolve", self.do_sketch_revolve))
+        numeric_sketch_group.add_action(self._action("Rectangle\n+ Extrude", self.do_sketch_rect_extrude, "rect"))
+        numeric_sketch_group.add_action(self._action("Circle\n+ Extrude", self.do_sketch_circle_extrude, "circle"))
+        numeric_sketch_group.add_action(self._action("Revolve", self.do_sketch_revolve, "revolve"))
 
         history_group = design_tab.add_group("History")
-        undo_action = self._action("Undo", self.undo)
+        undo_action = self._action("Undo", self.undo, "undo")
         undo_action.setShortcut(QKeySequence.StandardKey.Undo)
         history_group.add_action(undo_action)
-        redo_action = self._action("Redo", self.redo)
+        redo_action = self._action("Redo", self.redo, "redo")
         redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         history_group.add_action(redo_action)
 
         view_group = design_tab.add_group("View")
-        view_group.add_action(self._action("Fit All", self.viewport.fit_all))
+        view_group.add_action(self._action("Fit All", self.viewport.fit_all, "fit_all"))
 
         sketch_tab = self.ribbon.add_tab("Sketch")
         draw_group = sketch_tab.add_group("Draw")
@@ -148,18 +151,19 @@ class MainWindow(QMainWindow):
             ("arc3pt", "3-Point\nArc"),
         ]:
             action = QAction(label, self)
+            action.setIcon(icons.get(name))
             action.setCheckable(True)
             action.toggled.connect(lambda checked, n=name: self._on_sketch_entity_toggled(n, checked))
             self.sketch_entity_actions[name] = action
             draw_group.add_action(action)
 
         finish_group = sketch_tab.add_group("Sketch")
-        finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch))
-        finish_group.add_action(self._action("Cancel Sketch", self.cancel_interactive_sketch))
+        finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch, "check"))
+        finish_group.add_action(self._action("Cancel Sketch", self.cancel_interactive_sketch, "cancel"))
 
         inspect_tab = self.ribbon.add_tab("Inspect")
         measure_group = inspect_tab.add_group("Measure")
-        measure_group.add_action(self._tool_action("measure", "Measure"))
+        measure_group.add_action(self._tool_action("measure", "Measure", "measure"))
 
         self.ribbon.set_current_tab(0)
 
@@ -208,13 +212,17 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.context.AddOrRemoveSelected(ais, True)
         self.viewport.update()
 
-    def _action(self, label: str, slot) -> QAction:
+    def _action(self, label: str, slot, icon: str | None = None) -> QAction:
         action = QAction(label, self)
+        if icon:
+            action.setIcon(icons.get(icon))
         action.triggered.connect(slot)
         return action
 
-    def _tool_action(self, tool_name: str, label: str) -> QAction:
+    def _tool_action(self, tool_name: str, label: str, icon: str | None = None) -> QAction:
         action = QAction(label, self)
+        if icon:
+            action.setIcon(icons.get(icon))
         action.setCheckable(True)
         action.toggled.connect(lambda checked, name=tool_name: self._on_tool_toggled(name, checked))
         self._tool_actions[tool_name] = action
