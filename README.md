@@ -19,6 +19,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## UI
+
+A ribbon (Design/Sketch tabs, labeled button groups, a File menu) plus a
+Structure tree on the left listing every solid — click a tree item to select
+it in the viewport. This matches SpaceClaim's actual UI *paradigm* and
+terminology (Pull, Merge, Combine, Sketch Mode); it is not a pixel copy of
+SpaceClaim's artwork or branding, which are Siemens' proprietary assets.
+
 ## Using the app
 
 - **Box / Cylinder / Sphere** — add a primitive solid to the scene.
