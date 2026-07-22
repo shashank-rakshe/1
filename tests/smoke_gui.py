@@ -231,6 +231,31 @@ def run():
             assert len(window.document.objects) == count_before + 1, "real-mouse-drawn sketch should extrude into a new solid"
         except Exception as exc:
             errors.append(("real_mouse_sketch", exc))
+        QTimer.singleShot(200, step_measure)
+
+    def step_measure():
+        try:
+            from OCP.TopAbs import TopAbs_FACE
+            from OCP.TopExp import TopExp_Explorer
+            from OCP.TopoDS import TopoDS
+
+            obj_a = by_name(window, "FilletTest")
+            obj_b = by_name(window, "ChamferTest")
+            face_a = TopoDS.Face_s(TopExp_Explorer(obj_a.shape, TopAbs_FACE).Current())
+            face_b = TopoDS.Face_s(TopExp_Explorer(obj_b.shape, TopAbs_FACE).Current())
+
+            window._tool_actions["measure"].setChecked(True)
+            assert window.active_tool == "measure"
+            window._on_picked(face_a, obj_a.id)
+            assert len(window.measure_picks) == 1, "first face pick should be buffered, not yet resolved"
+            window._on_picked(face_b, obj_b.id)
+            assert len(window.measure_picks) == 0, "second pick should resolve the distance and reset"
+            assert "distance" in window.statusBar().currentMessage().lower()
+
+            window._tool_actions["measure"].setChecked(False)
+            assert window.active_tool == "select"
+        except Exception as exc:
+            errors.append(("measure", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
@@ -33,6 +33,7 @@ _TOOL_MODES = {
     "pull": (MODE_FACE, "Pull/Push: click a face"),
     "fillet": (MODE_EDGE, "Fillet: click an edge"),
     "chamfer": (MODE_EDGE, "Chamfer: click an edge"),
+    "measure": (MODE_FACE, "Measure: click a face for its area, or click a second face for the distance between them"),
 }
 
 
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
 
         self.active_tool = "select"
         self._tool_actions = {}
+        self.measure_picks = []
 
         self.interactive_sketch_active = False
         self.interactive_sketch_finish_mode = None  # "extrude" | "revolve"
@@ -145,6 +147,10 @@ class MainWindow(QMainWindow):
         finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch))
         finish_group.add_action(self._action("Cancel Sketch", self.cancel_interactive_sketch))
 
+        inspect_tab = self.ribbon.add_tab("Inspect")
+        measure_group = inspect_tab.add_group("Measure")
+        measure_group.add_action(self._tool_action("measure", "Measure"))
+
         self.ribbon.set_current_tab(0)
 
     def _wrap_in_toolbar(self, widget):
@@ -214,12 +220,14 @@ class MainWindow(QMainWindow):
             if self.interactive_sketch_active:
                 self._exit_interactive_sketch()
             self.active_tool = tool_name
+            self.measure_picks = []
             mode, hint = _TOOL_MODES[tool_name]
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(mode)
             self.statusBar().showMessage(hint)
         elif self.active_tool == tool_name:
             self.active_tool = "select"
+            self.measure_picks = []
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(MODE_SOLID)
             self.statusBar().showMessage("Ready")
@@ -624,6 +632,26 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_EDGE:
                 return
             self._apply_edge_op(obj, shape, self.active_tool)
+        elif self.active_tool == "measure":
+            if shape.ShapeType() != TopAbs_FACE:
+                return
+            self._on_measure_picked(shape)
+
+    def _on_measure_picked(self, face):
+        self.measure_picks.append(face)
+        if len(self.measure_picks) == 1:
+            self.statusBar().showMessage(
+                f"Measure: {measure.describe(face)} — click another face for the distance between them"
+            )
+        else:
+            a, b = self.measure_picks
+            self.measure_picks = []
+            try:
+                distance = measure.distance_between(a, b)
+            except Exception as exc:
+                QMessageBox.warning(self, "Measure failed", str(exc))
+                return
+            self.statusBar().showMessage(f"Measure: distance between faces = {distance:.4g}")
 
     def _apply_pull(self, obj, face):
         distance, ok = QInputDialog.getDouble(

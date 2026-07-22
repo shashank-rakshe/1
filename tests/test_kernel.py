@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure
 from dcad.kernel.document import Document
 
 
@@ -309,3 +309,39 @@ def test_open_polyline_wire_shape_type():
 def test_open_polyline_wire_requires_two_points():
     with pytest.raises(ValueError):
         sketch.open_polyline_wire([(0, 0, 0)])
+
+
+def test_measure_length_of_edge():
+    box = primitives.make_box(2, 3, 4)
+    edge = first_edge(box)
+    assert math.isclose(measure.length_of_edge(edge), 4.0, rel_tol=1e-6)
+
+
+def test_measure_area_of_face():
+    box = primitives.make_box(2, 3, 4)
+    face = first_face(box)
+    assert math.isclose(measure.area_of_face(face), 12.0, rel_tol=1e-6)
+
+
+def test_measure_volume_of_solid():
+    box = primitives.make_box(2, 3, 4)
+    assert math.isclose(measure.volume_of_solid(box), 24.0, rel_tol=1e-6)
+
+
+def test_measure_distance_between_separated_boxes():
+    a = primitives.make_box(1, 1, 1)
+    b = transform.translate(primitives.make_box(1, 1, 1), 5, 0, 0)
+    assert math.isclose(measure.distance_between(a, b), 4.0, rel_tol=1e-6)
+
+
+def test_measure_distance_between_touching_boxes_is_zero():
+    a = primitives.make_box(1, 1, 1)
+    b = transform.translate(primitives.make_box(1, 1, 1), 1, 0, 0)
+    assert math.isclose(measure.distance_between(a, b), 0.0, abs_tol=1e-9)
+
+
+def test_measure_describe_edge_face_solid():
+    box = primitives.make_box(2, 3, 4)
+    assert measure.describe(first_edge(box)).startswith("Length")
+    assert measure.describe(first_face(box)).startswith("Area")
+    assert measure.describe(box).startswith("Volume")
