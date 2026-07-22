@@ -1,7 +1,7 @@
 """Qt widget embedding the OCCT viewer, with mouse-driven camera navigation
 and face picking for the direct-modeling tools."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPoint
 from PySide6.QtWidgets import QWidget
 from PySide6.QtGui import QMouseEvent, QWheelEvent, QResizeEvent, QPaintEvent
 
@@ -13,6 +13,7 @@ class ViewportWidget(QWidget):
     sketch_clicked = Signal(float, float, float)
     sketch_hover = Signal(float, float, float)
     sketch_double_clicked = Signal()
+    right_clicked = Signal(QPoint)  # global position, for a context menu
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -101,12 +102,18 @@ class ViewportWidget(QWidget):
                 pos = event.position().toPoint()
                 x, y, z = self.viewer.screen_to_plane_point(pos.x(), pos.y())
                 self.sketch_clicked.emit(x, y, z)
-            elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            elif event.modifiers() & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier):
+                # SpaceClaim treats Ctrl+click and Shift+click the same way:
+                # both toggle-add the clicked item into the selection.
                 self.viewer.context.ShiftSelect(True)
                 self._emit_pick()
             else:
                 self.viewer.context.Select(True)
                 self._emit_pick()
+        elif event.button() == Qt.MouseButton.RightButton and was_click and self._initialized and not self.sketch_mode:
+            # A right-click that didn't turn into a pan drag opens the
+            # selection-dependent context menu (SpaceClaim's Select menu).
+            self.right_clicked.emit(event.globalPosition().toPoint())
         self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):

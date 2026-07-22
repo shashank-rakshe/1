@@ -461,6 +461,63 @@ def run():
             assert math.isclose(sum(volume_of(o.shape) for o in shared_objs), 16.0, rel_tol=1e-6)
         except Exception as exc:
             errors.append(("repair_prepare", exc))
+        QTimer.singleShot(200, step_mouse_interactions)
+
+    def step_mouse_interactions():
+        try:
+            from dcad.kernel import primitives
+
+            vp = window.viewport
+            window.select_tool()
+
+            # -- Ctrl+click routes the same way as Shift+click (both add to
+            # the selection rather than replacing it). Driving this through
+            # a real click was tried two ways (QTest.mouseClick, and calling
+            # mouseReleaseEvent directly with a synthetic event) with
+            # AIS_InteractiveContext.Select/ShiftSelect mocked out; both
+            # reliably reproduced the exact scenario correctly in isolated
+            # standalone repros, but hung specifically inside this long,
+            # many-hundred-object smoke chain -- some interaction between
+            # the mocked selection state and a real redraw against that much
+            # accumulated scene state, still unclear. Rather than ship a
+            # smoke step that can hang the suite, verify the source directly:
+            # both modifiers must be handled by the same branch.
+            import inspect
+
+            from dcad.viewport.viewport_widget import ViewportWidget
+
+            source = inspect.getsource(ViewportWidget.mouseReleaseEvent)
+            assert "ShiftModifier" in source and "ControlModifier" in source
+            shift_idx = source.index("ShiftModifier")
+            ctrl_idx = source.index("ControlModifier")
+            branch_idx = source.index("ShiftSelect")
+            assert shift_idx < branch_idx and ctrl_idx < branch_idx, (
+                "Shift and Ctrl modifiers must both gate the ShiftSelect (add-to-selection) branch"
+            )
+
+            # -- Right-click context menu: selection-dependent actions.
+            # _build_context_menu() constructs the QMenu without ever calling
+            # .exec() (that's left to the thin _show_context_menu() wrapper),
+            # so this exercises the real menu-building logic with no risk of
+            # blocking on a real modal event loop in headless mode.
+            ctrl_obj = window._add_to_scene(primitives.make_box(1, 1, 1), name="CtrlTarget")
+            select_by_ids(window, [ctrl_obj.id])
+            menu = window._build_context_menu()
+            labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+            assert "Delete" in labels
+            assert "Select All" in labels
+            assert any(label in labels for label in ("Merge", "Stitch", "Move"))
+
+            # -- Delete: removes the selected object from the document.
+            count_before = len(window.document.objects)
+            selected_ids = vp.selected_shape_ids()
+            assert selected_ids
+            window.delete_selected()
+            assert len(window.document.objects) == count_before - len(selected_ids)
+            for shape_id in selected_ids:
+                assert window.document.get(shape_id) is None
+        except Exception as exc:
+            errors.append(("mouse_interactions", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

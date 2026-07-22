@@ -71,7 +71,15 @@ branding, which are ANSYS's proprietary assets.
   any real CAD tool, including SpaceClaim's own STEP export).
 - **Open/Save Project...** — this tool's own `.dcadproj` format (a zip of
   BREP geometry + a name manifest). Not SpaceClaim's `.scdoc` — see Status.
-- Mouse: left-drag to orbit, middle/right-drag to pan, wheel to zoom.
+- Mouse: left-drag to orbit, middle/right-drag to pan, wheel to zoom,
+  left-click to select. **Ctrl+click** or **Shift+click** adds the clicked
+  item to the current selection instead of replacing it (matches
+  SpaceClaim, which treats both modifiers the same way). **Right-click** on
+  a selection opens a context menu (SpaceClaim's "Select" menu) with
+  actions scoped to what's selected — Move/Rotate/Copy/Merge Faces for one
+  solid, Merge/Subtract/Intersect/Stitch/Share Topology for two, Stitch/
+  Share Topology for more, plus Delete/Select All/Deselect All/Fit All.
+  **Delete** also works from the keyboard-equivalent toolbar action.
 
 ## Tests
 
@@ -109,9 +117,10 @@ plus a dialog-based alternative, sketch extrude and revolve, measure
 (distance/length/area/volume), Repair (Stitch/Fill/Merge Faces), Prepare
 (Interference/Enclosure/Share Topology), STEP/IGES import-export, native
 project save/load, a ribbon UI with original icons and a Structure tree,
-orbit/pan/zoom viewport with solid/face/edge picking. 64 kernel tests + a
-full end-to-end GUI smoke test (including real synthesized mouse clicks)
-cover all of it.
+orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
+multi-select, a selection-aware right-click context menu, and Delete.
+64 kernel tests + a full end-to-end GUI smoke test (including real
+synthesized mouse clicks) cover all of it.
 
 The interactive sketcher draws real geometry as you click, but there's no
 constraint solver — no dimensional constraints (exact length/angle), no

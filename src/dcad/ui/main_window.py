@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self.viewport.sketch_clicked.connect(self._on_sketch_clicked)
         self.viewport.sketch_hover.connect(self._on_sketch_hover)
         self.viewport.sketch_double_clicked.connect(self._on_sketch_finish_entity)
+        self.viewport.right_clicked.connect(self._show_context_menu)
 
         self.active_tool = "select"
         self._tool_actions = {}
@@ -199,6 +200,65 @@ class MainWindow(QMainWindow):
             self._exit_interactive_sketch()
         self.viewport.clear_selection()
         self.statusBar().showMessage("Ready")
+
+    def select_all(self):
+        self.viewport.clear_selection()
+        for obj in self.document.objects:
+            ais = self.viewport.viewer.ais_for(obj.id)
+            if ais is not None:
+                self.viewport.viewer.context.AddOrRemoveSelected(ais, False)
+        self.viewport.update()
+
+    def delete_selected(self):
+        ids = self.viewport.selected_shape_ids()
+        if not ids:
+            return
+        self.document.snapshot()
+        for shape_id in ids:
+            obj = self.document.get(shape_id)
+            if obj is not None:
+                self.viewport.viewer.remove_shape(shape_id)
+                self.document.remove(obj)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Deleted {len(ids)} object(s)")
+
+    # -- right-click context menu (SpaceClaim's Select menu) --------------
+    def _show_context_menu(self, global_pos):
+        self._build_context_menu().exec(global_pos)
+
+    def _build_context_menu(self) -> QMenu:
+        ids = self.viewport.selected_shape_ids()
+        menu = QMenu(self)
+
+        if len(ids) == 1:
+            obj = self.document.get(ids[0])
+            menu.addAction(self._action("Move", self.do_move, "move"))
+            menu.addAction(self._action("Rotate", self.do_rotate, "rotate"))
+            menu.addAction(self._action("Copy", self.do_copy, "copy"))
+            if obj is not None and obj.shape.ShapeType() == TopAbs_FACE:
+                menu.addAction(self._action("Revolve", self.do_revolve_surface, "revolve"))
+            menu.addAction(self._action("Merge Faces", self.do_merge_faces, "merge_faces"))
+            menu.addSeparator()
+        elif len(ids) == 2:
+            menu.addAction(self._action("Merge", self.do_union, "merge"))
+            menu.addAction(self._action("Subtract", self.do_subtract, "subtract"))
+            menu.addAction(self._action("Intersect", self.do_intersect, "intersect"))
+            menu.addAction(self._action("Stitch", self.do_stitch, "stitch"))
+            menu.addAction(self._action("Share Topology", self.do_share_topology, "share_topology"))
+            menu.addSeparator()
+        elif len(ids) > 2:
+            menu.addAction(self._action("Stitch", self.do_stitch, "stitch"))
+            menu.addAction(self._action("Share Topology", self.do_share_topology, "share_topology"))
+            menu.addSeparator()
+
+        if ids:
+            menu.addAction(self._action("Delete", self.delete_selected, "cancel"))
+            menu.addSeparator()
+
+        menu.addAction(self._action("Select All", self.select_all, "select"))
+        menu.addAction(self._action("Deselect All", self.viewport.clear_selection))
+        menu.addAction(self._action("Fit All", self.viewport.fit_all, "fit_all"))
+        return menu
 
     # -- structure tree -----------------------------------------------
     def _build_structure_tree(self):
