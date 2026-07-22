@@ -112,6 +112,19 @@ def test_step_roundtrip(tmp_path):
     assert math.isclose(volume_of(loaded), volume_of(box), rel_tol=1e-4)
 
 
+def test_step_import_multi_keeps_parts_separate(tmp_path):
+    box = primitives.make_box(1, 1, 1)
+    sphere = primitives.make_sphere(1)
+    path = tmp_path / "assembly.step"
+    io_step.export_step([box, sphere], str(path))
+    shapes = io_step.import_step_multi(str(path))
+    assert len(shapes) == 2
+    volumes = sorted(volume_of(s) for s in shapes)
+    expected = sorted([volume_of(box), volume_of(sphere)])
+    for got, want in zip(volumes, expected):
+        assert math.isclose(got, want, rel_tol=1e-4)
+
+
 def test_document_add_remove():
     doc = Document()
     box = primitives.make_box(1, 1, 1)

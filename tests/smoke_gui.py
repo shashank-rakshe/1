@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QFileDialog
 from PySide6.QtCore import QTimer, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtCore import Qt
@@ -576,7 +576,38 @@ def run():
             assert reloaded is not None
         except Exception as exc:
             errors.append(("step_io", exc))
-        QTimer.singleShot(200, step_screenshot)
+        QTimer.singleShot(200, step_open_step_worker)
+
+    def step_open_step_worker():
+        # Exercises the real background-thread open_step() path (not just
+        # the kernel-level io_step calls above): a multi-part STEP file
+        # should come in as separate, independently-selectable document
+        # objects, via a QThread worker, without freezing the event loop.
+        try:
+            from dcad.kernel import primitives, io_step
+
+            out = Path(__file__).parent.parent / "scratch_assembly.step"
+            io_step.export_step(
+                [primitives.make_box(1, 1, 1), primitives.make_sphere(1)], str(out)
+            )
+            count_before = len(window.document.objects)
+
+            with patch.object(QFileDialog, "getOpenFileName", return_value=(str(out), "")):
+                window.open_step()
+
+            def check_result():
+                try:
+                    assert window._step_import_worker is None, "worker should have finished"
+                    assert len(window.document.objects) == count_before + 2
+                    out.unlink(missing_ok=True)
+                except Exception as exc:
+                    errors.append(("open_step_worker", exc))
+                QTimer.singleShot(200, step_screenshot)
+
+            QTimer.singleShot(500, check_result)
+        except Exception as exc:
+            errors.append(("open_step_worker", exc))
+            QTimer.singleShot(200, step_screenshot)
 
     def step_screenshot():
         try:

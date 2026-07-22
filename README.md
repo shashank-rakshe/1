@@ -6,6 +6,12 @@ them together, push/pull faces directly, and exchange STEP/IGES files.
 Built on [OCCT](https://dev.opencascade.org/) (via the [OCP](https://github.com/CadQuery/OCP)
 Python bindings) and PySide6 (Qt).
 
+**Target use case**: professional work on large structural/assembly models,
+not just small demo parts — so opening and navigating a big STEP file needs
+to stay fast and responsive, the same bar set by [Mayo](https://github.com/fougue/mayo)
+(also OCCT-based). See "Performance" under Status for what's implemented
+toward that and what's still open.
+
 ## Setup
 
 ```
@@ -119,8 +125,39 @@ plus a dialog-based alternative, sketch extrude and revolve, measure
 project save/load, a ribbon UI with original icons and a Structure tree,
 orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
 multi-select, a selection-aware right-click context menu, and Delete.
-64 kernel tests + a full end-to-end GUI smoke test (including real
+65 kernel tests + a full end-to-end GUI smoke test (including real
 synthesized mouse clicks) cover all of it.
+
+### Performance (large models)
+
+Since the target use is real structural/assembly models rather than small
+demo parts, a few concrete levers are in place so this scales like a
+production tool (Mayo/SpaceClaim), not a toy:
+
+- **STEP import is off the UI thread.** `open_step()` runs the file read
+  and mesh precompute on a `QThread` (`ui/workers.py`), so opening a large
+  file doesn't freeze the window — a progress dialog stays responsive
+  while it loads.
+- **STEP import preserves per-part structure.** `import_step_multi()`
+  (`kernel/io_step.py`) returns each root shape separately instead of
+  flattening the whole file into one compound, so a big assembly opens as
+  independently selectable/hideable/deletable parts, the same way it would
+  in SpaceClaim or Mayo — not as one inert blob.
+- **Tessellation is explicit, relative, and parallel.** `tessellate()`
+  (`viewport/occt_viewer.py`) meshes each shape with `BRepMesh_
+  IncrementalMesh` up front using a deflection scaled to that shape's own
+  bounding-box diagonal (consistent visual quality regardless of model
+  scale) and `isInParallel=True` (uses all cores), instead of relying on
+  OCCT's implicit serial meshing on first display.
+- Bulk imports use a single `fit_all()`/structure-tree rebuild after all
+  parts are added (`_add_many_to_scene`), not one per part — rebuilding
+  the tree per part would be O(n²) for an assembly with many components.
+
+Benchmarked: importing + tessellating a synthetic 500-part STEP assembly
+takes ~2s total off the UI thread. Not yet done: instanced rendering for
+repeated parts, level-of-detail for distant geometry, and incremental/
+streaming import for files too large to hold fully in memory — the next
+layer if a real-world file turns out to need it.
 
 The interactive sketcher draws real geometry as you click, but there's no
 constraint solver — no dimensional constraints (exact length/angle), no

@@ -1,5 +1,7 @@
 """Main application window: toolbar-driven direct-modeling CAD shell."""
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QFileDialog,
@@ -10,6 +12,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QTreeWidget,
     QTreeWidgetItem,
+    QProgressDialog,
 )
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
@@ -21,6 +24,7 @@ from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
 from dcad.ui.theme import STYLESHEET
 from dcad.ui import icons
+from dcad.ui.workers import StepImportWorker
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
 
@@ -348,6 +352,22 @@ class MainWindow(QMainWindow):
         self._refresh_structure_tree()
         self.statusBar().showMessage(f"Added {obj.name}")
         return obj
+
+    def _add_many_to_scene(self, shapes, name_prefix: str = ""):
+        """Bulk version of `_add_to_scene`: adds every shape, then does a
+        single fit_all()/structure-tree rebuild at the end instead of one
+        per shape -- rebuilding the tree per part would be O(n^2) for a
+        big assembly import."""
+        objs = []
+        for i, shape in enumerate(shapes):
+            name = f"{name_prefix}{i + 1}" if name_prefix else ""
+            obj = self.document.add(shape, name=name)
+            self.viewport.viewer.display_shape(obj.id, shape)
+            objs.append(obj)
+        self.viewport.fit_all()
+        self._refresh_structure_tree()
+        self.statusBar().showMessage(f"Added {len(objs)} part(s)")
+        return objs
 
     def _sync_viewport(self):
         self.viewport.update()
@@ -935,13 +955,34 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open STEP", "", "STEP files (*.step *.stp)")
         if not path:
             return
-        try:
-            shape = io_step.import_step(path)
-        except Exception as exc:
-            QMessageBox.warning(self, "Open failed", str(exc))
-            return
-        self.document.snapshot()
-        self._add_to_scene(shape)
+
+        progress = QProgressDialog("Importing STEP file...", "", 0, 0, self)
+        progress.setWindowTitle("Open STEP")
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        # Reading + tessellating a big assembly can take a while; doing it
+        # on a worker thread keeps the UI (and this progress dialog) alive
+        # instead of freezing for the duration of the import.
+        worker = StepImportWorker(path, self)
+
+        def on_succeeded(shapes):
+            progress.close()
+            self.document.snapshot()
+            self._add_many_to_scene(shapes, name_prefix=Path(path).stem + "_")
+            self._step_import_worker = None
+
+        def on_failed(message):
+            progress.close()
+            QMessageBox.warning(self, "Open failed", message)
+            self._step_import_worker = None
+
+        worker.succeeded.connect(on_succeeded)
+        worker.failed.connect(on_failed)
+        self._step_import_worker = worker  # keep alive for the thread's duration
+        worker.start()
 
     def save_step(self):
         if not self.document.objects:

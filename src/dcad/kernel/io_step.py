@@ -32,7 +32,14 @@ def export_step(shapes: list[TopoDS_Shape], path: str) -> None:
         raise RuntimeError(f"STEP write failed (status={status})")
 
 
-def import_step(path: str) -> TopoDS_Shape:
+def import_step_multi(path: str) -> list[TopoDS_Shape]:
+    """Import a STEP file, keeping each root shape separate instead of
+    flattening the whole file into one compound.
+
+    Large assembly files hold many independently-named parts; returning
+    them as a list lets the caller add each as its own document object
+    (so a big structural model stays selectable/hideable part-by-part,
+    the same way it opens in SpaceClaim or Mayo)."""
     if not Path(path).exists():
         raise FileNotFoundError(path)
     reader = STEPControl_Reader()
@@ -43,7 +50,11 @@ def import_step(path: str) -> TopoDS_Shape:
     shapes = [reader.Shape(i + 1) for i in range(reader.NbShapes())]
     if not shapes:
         raise RuntimeError("STEP file contained no shapes")
-    return _shapes_to_compound(shapes)
+    return shapes
+
+
+def import_step(path: str) -> TopoDS_Shape:
+    return _shapes_to_compound(import_step_multi(path))
 
 
 def export_iges(shapes: list[TopoDS_Shape], path: str) -> None:

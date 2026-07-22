@@ -10,12 +10,39 @@ from OCP.Graphic3d import Graphic3d_NameOfMaterial, Graphic3d_MaterialAspect
 from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE, TopAbs_EDGE
 from OCP.TopoDS import TopoDS_Shape
 from OCP.gp import gp_Ax3
+from OCP.Bnd import Bnd_Box
+from OCP.BRepBndLib import BRepBndLib
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
 
 MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
 MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
 MODE_EDGE = AIS_Shape.SelectionMode_s(TopAbs_EDGE)
 
 PREVIEW_ID = -1
+
+# Relative-to-size tessellation: a fixed absolute deflection either wastes
+# time over-tessellating small parts or under-tessellates a huge assembly.
+# Scaling by the shape's own bounding diagonal keeps visual quality (and
+# triangle count) roughly constant regardless of model scale.
+_DEFLECTION_RATIO = 0.001
+_MIN_DEFLECTION = 1e-4
+
+
+def tessellate(shape: TopoDS_Shape) -> None:
+    """Precompute the display mesh for `shape` with parallel meshing.
+
+    AIS_Shape would otherwise tessellate lazily and serially on first
+    display; doing it explicitly here -- in parallel, with size-relative
+    deflection -- is the concrete lever that keeps large STEP assemblies
+    (thousands of faces) responsive instead of freezing the UI thread."""
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box)
+    if box.IsVoid():
+        return
+    xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+    diagonal = ((xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2) ** 0.5
+    deflection = max(diagonal * _DEFLECTION_RATIO, _MIN_DEFLECTION)
+    BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
 
 
 class OcctViewer:
@@ -63,6 +90,7 @@ class OcctViewer:
             self.view.ZFitAll()
 
     def display_shape(self, shape_id: int, shape: TopoDS_Shape, material=Graphic3d_NameOfMaterial.Graphic3d_NOM_PLASTIC) -> AIS_Shape:
+        tessellate(shape)
         ais = AIS_Shape(shape)
         ais.SetMaterial(Graphic3d_MaterialAspect(material))
         self.context.Display(ais, False)
