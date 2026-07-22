@@ -34,6 +34,13 @@ class ViewportWidget(QWidget):
         if not self._initialized:
             self.viewer.bind_window(int(self.winId()), self.width(), self.height())
             self._initialized = True
+            self.viewer.resize()
+            # The underlying native X11 window may still be catching up to
+            # Qt's logical geometry when bind_window() queries it; re-sync
+            # once more after the event loop flushes the pending resize.
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self.viewer.resize)
 
     def resizeEvent(self, event: QResizeEvent):
         super().resizeEvent(event)

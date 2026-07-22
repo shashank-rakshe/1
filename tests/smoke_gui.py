@@ -83,7 +83,11 @@ def run():
             pixmap.save(str(SCREENSHOT_PATH))
         except Exception as exc:
             errors.append(("screenshot", exc))
-        app.quit()
+        import os
+        if os.environ.get("SMOKE_KEEP_OPEN"):
+            QTimer.singleShot(int(os.environ.get("SMOKE_HOLD_MS", "4000")), app.quit)
+        else:
+            app.quit()
 
     QTimer.singleShot(500, step1)
     app.exec()
