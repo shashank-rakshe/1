@@ -64,12 +64,18 @@ src/dcad/
 ## Status
 
 Working: primitive creation, boolean ops, planar-face pull/push,
-fillet/chamfer, move/rotate/copy, undo/redo, STEP/IGES import-export,
-native project save/load, orbit/pan/zoom viewport with solid/face/edge
-picking.
+fillet/chamfer, move/rotate/copy, undo/redo, sketch-based extrude and
+revolve (rectangle/circle profiles), STEP/IGES import-export, native
+project save/load, orbit/pan/zoom viewport with solid/face/edge picking.
+30 kernel tests + a full end-to-end GUI smoke test cover all of it.
 
-Not yet built (real SpaceClaim features, in progress): sketch-based
-extrude/revolve, assemblies, sheet metal, drawings, measurement tools.
+Sketch profiles are entered as coordinates via a dialog, not drawn
+interactively on screen — a real 2D constrained sketcher (click to
+place points/lines, drag to adjust, dimensional constraints) is a much
+bigger feature and the natural next step if wanted.
+
+Not yet built (real SpaceClaim features, in progress): interactive 2D
+sketching, assemblies, sheet metal, drawings, measurement tools.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 Siemens format — no open reader exists); a Parasolid kernel (commercial,
