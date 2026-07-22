@@ -6,8 +6,10 @@ This covers the common planar-face case, not arbitrary/curved-face pulls.
 """
 
 from OCP.BRep import BRep_Tool
+from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepTools import BRepTools
 from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+from OCP.GeomAbs import GeomAbs_Plane
 from OCP.GeomLProp import GeomLProp_SLProps
 from OCP.TopAbs import TopAbs_REVERSED
 from OCP.TopoDS import TopoDS_Face, TopoDS_Shape
@@ -32,10 +34,15 @@ def pull_face(solid: TopoDS_Shape, face: TopoDS_Face, distance: float) -> TopoDS
     """Offset a planar face along its outward normal by `distance`.
 
     Positive distance pulls material outward (fuse); negative pushes
-    material inward (cut).
+    material inward (cut). Only planar faces are supported: extruding a
+    curved or closed face (e.g. a full sphere/cylinder face) into a prism
+    is not a meaningful operation and can make OCCT's boolean/meshing
+    algorithms run for a very long time on the resulting degenerate shape.
     """
     if distance == 0:
         return solid
+    if BRepAdaptor_Surface(face, True).GetType() != GeomAbs_Plane:
+        raise ValueError("Pull/Push only supports planar faces")
     normal = face_outward_normal(face)
     vec = gp_Vec(normal.X() * distance, normal.Y() * distance, normal.Z() * distance)
     tool = BRepPrimAPI_MakePrism(face, vec).Shape()

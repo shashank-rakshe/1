@@ -7,11 +7,12 @@ from OCP.AIS import AIS_InteractiveContext, AIS_Shape
 from OCP.Xw import Xw_Window
 from OCP.Quantity import Quantity_Color, Quantity_NOC_GRAY20, Quantity_NOC_BLACK
 from OCP.Graphic3d import Graphic3d_NameOfMaterial, Graphic3d_MaterialAspect
-from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE
+from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE, TopAbs_EDGE
 from OCP.TopoDS import TopoDS_Shape
 
 MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
 MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
+MODE_EDGE = AIS_Shape.SelectionMode_s(TopAbs_EDGE)
 
 
 class OcctViewer:
@@ -77,6 +78,10 @@ class OcctViewer:
 
     def ais_for(self, shape_id: int) -> AIS_Shape | None:
         return self._ais_by_shape_id.get(shape_id)
+
+    def clear_all(self) -> None:
+        for shape_id in list(self._ais_by_shape_id):
+            self.remove_shape(shape_id)
 
     def set_pick_mode(self, mode: int) -> None:
         """Switch the active selection granularity (MODE_SOLID or MODE_FACE)."""
