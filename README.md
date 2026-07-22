@@ -29,6 +29,16 @@ python main.py
 - **Fillet / Chamfer** — toggle the tool, click an edge, enter a radius/distance.
 - **Move / Rotate / Copy** — select one solid, then run the tool and enter
   the offset/angle (Rotate is about the Z axis through the origin in v1).
+- **Sketch (Extrude) / Sketch (Revolve)** — toggle one, pick Line/Rectangle/
+  Circle, click points directly in the viewport (a live preview follows
+  the mouse), then **Finish Sketch** to pull every profile drawn into a
+  solid. Line: click each point, double-click to close the polygon.
+  Extrude sketches on the XY plane; Revolve sketches on the XZ plane
+  (about the Z axis) — mixing them up produces a zero-volume result, so
+  the tool keeps them separate. **Cancel Sketch** discards without adding
+  anything. There's also a dialog-based version of the same idea (Sketch
+  Rect+Extrude / Sketch Circle+Extrude / Sketch Revolve) for typing exact
+  coordinates instead of clicking.
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -43,9 +53,11 @@ pip install pytest
 PYTHONPATH=src pytest tests/test_kernel.py
 ```
 
-`tests/smoke_gui.py` exercises the full app (primitives, booleans, pull/push,
-fillet/chamfer, move/rotate/copy, undo/redo, STEP and project round-trips)
-end-to-end; on Linux without a display, run it under Xvfb:
+`tests/smoke_gui.py` exercises the full app end-to-end (primitives, booleans,
+pull/push, fillet/chamfer, move/rotate/copy, undo/redo, dialog- and click-
+driven sketch+extrude/revolve — including real synthesized mouse events
+through the actual viewport widget, not just direct method calls — plus
+STEP and project round-trips); on Linux without a display, run it under Xvfb:
 
 ```
 xvfb-run -a python3 tests/smoke_gui.py
@@ -64,18 +76,21 @@ src/dcad/
 ## Status
 
 Working: primitive creation, boolean ops, planar-face pull/push,
-fillet/chamfer, move/rotate/copy, undo/redo, sketch-based extrude and
-revolve (rectangle/circle profiles), STEP/IGES import-export, native
-project save/load, orbit/pan/zoom viewport with solid/face/edge picking.
-30 kernel tests + a full end-to-end GUI smoke test cover all of it.
+fillet/chamfer, move/rotate/copy, undo/redo, interactive click-to-sketch
+drawing (Line/Rectangle/Circle) plus a dialog-based alternative, sketch
+extrude and revolve, STEP/IGES import-export, native project save/load,
+orbit/pan/zoom viewport with solid/face/edge picking. 40 kernel tests + a
+full end-to-end GUI smoke test (including real synthesized mouse clicks)
+cover all of it.
 
-Sketch profiles are entered as coordinates via a dialog, not drawn
-interactively on screen — a real 2D constrained sketcher (click to
-place points/lines, drag to adjust, dimensional constraints) is a much
-bigger feature and the natural next step if wanted.
+The interactive sketcher draws real geometry as you click, but there's no
+constraint solver — no dimensional constraints (exact length/angle), no
+geometric constraints (parallel, coincident, tangent), no dragging to
+adjust an already-placed point. That's the natural next layer if wanted:
+it's what separates "click to draw" from a true parametric sketcher.
 
-Not yet built (real SpaceClaim features, in progress): interactive 2D
-sketching, assemblies, sheet metal, drawings, measurement tools.
+Not yet built (real SpaceClaim features, in progress): sketch constraints,
+assemblies, sheet metal, drawings, measurement tools.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 Siemens format — no open reader exists); a Parasolid kernel (commercial,
