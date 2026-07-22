@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
@@ -35,6 +35,7 @@ _TOOL_MODES = {
     "fillet": (MODE_EDGE, "Fillet: click an edge"),
     "chamfer": (MODE_EDGE, "Chamfer: click an edge"),
     "measure": (MODE_FACE, "Measure: click a face for its area, or click a second face for the distance between them"),
+    "fill": (MODE_FACE, "Fill: click a face to remove and heal"),
 }
 
 
@@ -164,6 +165,20 @@ class MainWindow(QMainWindow):
         inspect_tab = self.ribbon.add_tab("Inspect")
         measure_group = inspect_tab.add_group("Measure")
         measure_group.add_action(self._tool_action("measure", "Measure", "measure"))
+
+        repair_tab = self.ribbon.add_tab("Repair")
+        solidify_group = repair_tab.add_group("Solidify")
+        solidify_group.add_action(self._action("Stitch", self.do_stitch, "stitch"))
+        fix_group = repair_tab.add_group("Fix")
+        fix_group.add_action(self._tool_action("fill", "Fill", "fill"))
+        adjust_group = repair_tab.add_group("Adjust")
+        adjust_group.add_action(self._action("Merge\nFaces", self.do_merge_faces, "merge_faces"))
+
+        prepare_tab = self.ribbon.add_tab("Prepare")
+        prepare_group = prepare_tab.add_group("Prepare")
+        prepare_group.add_action(self._action("Interference", self.do_check_interference, "interference"))
+        prepare_group.add_action(self._action("Enclosure", self.do_enclosure, "enclosure"))
+        prepare_group.add_action(self._action("Share\nTopology", self.do_share_topology, "share_topology"))
 
         self.ribbon.set_current_tab(0)
 
@@ -324,6 +339,95 @@ class MainWindow(QMainWindow):
 
     def do_intersect(self):
         self._apply_boolean(booleans.intersect, "Intersect")
+
+    # -- repair (Stitch, Fill, Merge Faces) -------------------------------
+    def _selected_multiple(self, min_count: int = 2):
+        ids = self.viewport.selected_shape_ids()
+        if len(ids) < min_count:
+            QMessageBox.information(self, "Select solids", f"Select at least {min_count} solids first.")
+            return None
+        objs = [self.document.get(i) for i in ids]
+        if any(o is None for o in objs):
+            return None
+        return objs
+
+    def do_stitch(self):
+        objs = self._selected_multiple(2)
+        if objs is None:
+            return
+        try:
+            result = repair.stitch([o.shape for o in objs])
+        except Exception as exc:
+            QMessageBox.warning(self, "Stitch failed", str(exc))
+            return
+        self.document.snapshot()
+        for obj in objs:
+            self.viewport.viewer.remove_shape(obj.id)
+            self.document.remove(obj)
+        self._add_to_scene(result, name="Stitched")
+
+    def do_merge_faces(self):
+        obj = self._selected_single()
+        if obj is None:
+            return
+        try:
+            new_shape = repair.merge_faces(obj.shape)
+        except Exception as exc:
+            QMessageBox.warning(self, "Merge Faces failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(obj, new_shape)
+        self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Merged faces on {obj.name}")
+
+    # -- prepare (Interference, Enclosure, Share Topology) ----------------
+    def do_check_interference(self):
+        if len(self.document.objects) < 2:
+            QMessageBox.information(self, "Interference", "Need at least two solids in the document.")
+            return
+        objs = self.document.objects
+        hits = prepare.check_interference([o.shape for o in objs])
+        if not hits:
+            QMessageBox.information(self, "Interference", "No interference found.")
+            return
+        lines = [f"{objs[i].name} ↔ {objs[j].name}: overlap volume {v:.4g}" for i, j, v in hits]
+        QMessageBox.information(self, "Interference", "\n".join(lines))
+
+    def do_enclosure(self):
+        ids = self.viewport.selected_shape_ids()
+        objs = [self.document.get(i) for i in ids] if ids else list(self.document.objects)
+        if not objs:
+            QMessageBox.information(self, "Enclosure", "Nothing to build an enclosure around.")
+            return
+        margin, ok = QInputDialog.getDouble(self, "Enclosure", "Margin:", 5.0, 0.001, 10000.0, 3)
+        if not ok:
+            return
+        try:
+            enclosure = prepare.make_enclosure([o.shape for o in objs], margin)
+        except Exception as exc:
+            QMessageBox.warning(self, "Enclosure failed", str(exc))
+            return
+        self.document.snapshot()
+        self._add_to_scene(enclosure, name="Enclosure")
+
+    def do_share_topology(self):
+        objs = self._selected_multiple(2)
+        if objs is None:
+            return
+        try:
+            result = prepare.share_topology([o.shape for o in objs])
+        except Exception as exc:
+            QMessageBox.warning(self, "Share Topology failed", str(exc))
+            return
+        solids = prepare.explode_solids(result)
+        self.document.snapshot()
+        for obj in objs:
+            self.viewport.viewer.remove_shape(obj.id)
+            self.document.remove(obj)
+        for solid in solids:
+            self._add_to_scene(solid, name="Shared")
+        self.statusBar().showMessage(f"Share Topology: {len(solids)} solid(s) now share topology")
 
     # -- sketch (rectangle/circle profile) + extrude / revolve ------------
     def _prompt_floats(self, title: str, label: str, defaults: tuple):
@@ -686,6 +790,22 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_FACE:
                 return
             self._on_measure_picked(shape)
+        elif self.active_tool == "fill":
+            if shape.ShapeType() != TopAbs_FACE:
+                return
+            self._apply_fill(obj, shape)
+
+    def _apply_fill(self, obj, face):
+        try:
+            new_shape = repair.fill_faces(obj.shape, [face])
+        except Exception as exc:
+            QMessageBox.warning(self, "Fill failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(obj, new_shape)
+        self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Filled a face on {obj.name}")
 
     def _on_measure_picked(self, face):
         self.measure_picks.append(face)

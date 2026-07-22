@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from PySide6.QtWidgets import QApplication, QInputDialog
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
 from PySide6.QtCore import QTimer, QPoint
 from PySide6.QtTest import QTest
 from PySide6.QtCore import Qt
@@ -35,6 +35,15 @@ def select_by_ids(window, ids):
 
 def by_name(window, name):
     return next(o for o in window.document.objects if o.name == name)
+
+
+def volume_of(shape):
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(shape, props)
+    return props.Mass()
 
 
 def first_face_of_type(shape, planar: bool):
@@ -357,6 +366,101 @@ def run():
                 assert obj.shape.ShapeType() == TopAbs_FACE, "new sketch tools should also produce flat Surfaces"
         except Exception as exc:
             errors.append(("new_sketch_tools", exc))
+        QTimer.singleShot(200, step_repair_prepare)
+
+    def step_repair_prepare():
+        try:
+            from dcad.kernel import primitives, transform, fillet as fillet_mod
+            from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_SOLID
+            from OCP.TopExp import TopExp_Explorer
+            from OCP.TopoDS import TopoDS
+
+            def face_count(shape):
+                n, exp = 0, TopExp_Explorer(shape, TopAbs_FACE)
+                while exp.More():
+                    n += 1
+                    exp.Next()
+                return n
+
+            # -- Stitch: 6 disjoint faces (as separate document objects) -> 1 solid
+            box = primitives.make_box(2, 3, 4)
+            face_ids = []
+            fexp = TopExp_Explorer(box, TopAbs_FACE)
+            while fexp.More():
+                obj = window._add_to_scene(TopoDS.Face_s(fexp.Current()), name="StitchFace")
+                face_ids.append(obj.id)
+                fexp.Next()
+            select_by_ids(window, face_ids)
+            window.do_stitch()
+            stitched = by_name(window, "Stitched")
+            assert stitched.shape.ShapeType() == TopAbs_SOLID
+            assert math.isclose(volume_of(stitched.shape), 24.0, rel_tol=1e-6)
+
+            # -- Fill: remove a filleted edge's round face, heal back to the box
+            fill_box = window._add_to_scene(primitives.make_box(4, 4, 4), name="FillBase")
+            edge = TopoDS.Edge_s(TopExp_Explorer(fill_box.shape, TopAbs_EDGE).Current())
+            window.document.replace_shape(fill_box, fillet_mod.fillet_edge(fill_box.shape, edge, 0.5))
+            fill_box = window.document.get(fill_box.id)
+            window.viewport.viewer.redisplay_shape(fill_box.id, fill_box.shape)
+
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            from OCP.GeomAbs import GeomAbs_Cylinder
+
+            round_face = None
+            exp2 = TopExp_Explorer(fill_box.shape, TopAbs_FACE)
+            while exp2.More():
+                f = TopoDS.Face_s(exp2.Current())
+                if BRepAdaptor_Surface(f, True).GetType() == GeomAbs_Cylinder:
+                    round_face = f
+                    break
+                exp2.Next()
+            assert round_face is not None
+
+            window._tool_actions["fill"].setChecked(True)
+            window._on_picked(round_face, fill_box.id)
+            window._tool_actions["fill"].setChecked(False)
+            healed = window.document.get(fill_box.id)
+            assert math.isclose(volume_of(healed.shape), 64.0, rel_tol=1e-6)
+
+            # -- Merge Faces: stacked boxes with a redundant seam -> clean box
+            stack_a = primitives.make_box(4, 4, 2)
+            stack_b = transform.translate(primitives.make_box(4, 4, 4), 0, 0, 2)
+            from dcad.kernel import booleans
+
+            fused = booleans.union(stack_a, stack_b)
+            fused_obj = window._add_to_scene(fused, name="FusedStack")
+            assert face_count(fused_obj.shape) > 6
+            select_by_ids(window, [fused_obj.id])
+            window.do_merge_faces()
+            merged_obj = window.document.get(fused_obj.id)
+            assert face_count(merged_obj.shape) == 6
+            assert math.isclose(volume_of(merged_obj.shape), 96.0, rel_tol=1e-6)
+
+            # -- Interference: two overlapping boxes get reported
+            overlap_a = window._add_to_scene(primitives.make_box(4, 4, 4), name="OverlapA")
+            overlap_b = window._add_to_scene(transform.translate(primitives.make_box(4, 4, 4), 2, 2, 2), name="OverlapB")
+            with patch.object(QMessageBox, "information", return_value=None) as mock_info:
+                window.do_check_interference()
+            assert mock_info.called
+
+            # -- Enclosure: a void solid built around a part
+            enc_target = by_name(window, "OverlapA")
+            select_by_ids(window, [enc_target.id])
+            with patch.object(QInputDialog, "getDouble", return_value=(2.0, True)):
+                window.do_enclosure()
+            enclosure = by_name(window, "Enclosure")
+            assert volume_of(enclosure.shape) > 0
+
+            # -- Share Topology: two touching boxes stay separate solids
+            share_a = window._add_to_scene(primitives.make_box(2, 2, 2), name="ShareA")
+            share_b = window._add_to_scene(transform.translate(primitives.make_box(2, 2, 2), 2, 0, 0), name="ShareB")
+            select_by_ids(window, [share_a.id, share_b.id])
+            window.do_share_topology()
+            shared_objs = [o for o in window.document.objects if o.name == "Shared"]
+            assert len(shared_objs) == 2
+            assert math.isclose(sum(volume_of(o.shape) for o in shared_objs), 16.0, rel_tol=1e-6)
+        except Exception as exc:
+            errors.append(("repair_prepare", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

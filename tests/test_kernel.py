@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare
 from dcad.kernel.document import Document
 
 
@@ -25,6 +25,19 @@ def first_face(shape):
 def first_edge(shape):
     explorer = TopExp_Explorer(shape, TopAbs_EDGE)
     return TopoDS.Edge_s(explorer.Current())
+
+
+def all_faces(shape):
+    faces = []
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        faces.append(TopoDS.Face_s(explorer.Current()))
+        explorer.Next()
+    return faces
+
+
+def face_count(shape) -> int:
+    return len(all_faces(shape))
 
 
 def test_make_box_volume():
@@ -383,3 +396,98 @@ def test_three_point_circle_profile_area():
 def test_three_point_arc_segment_profile_half_circle_area():
     segment = sketch.three_point_arc_segment_profile((1, 0, 0), (0, 1, 0), (-1, 0, 0))
     assert math.isclose(measure.area_of_face(segment), 0.5 * math.pi * 1**2, rel_tol=1e-6)
+
+
+def test_stitch_rebuilds_solid_from_exploded_faces():
+    from OCP.TopAbs import TopAbs_SOLID
+
+    box = primitives.make_box(2, 3, 4)
+    stitched = repair.stitch(all_faces(box))
+    assert stitched.ShapeType() == TopAbs_SOLID
+    assert math.isclose(volume_of(stitched), 24.0, rel_tol=1e-6)
+
+
+def test_fill_heals_a_removed_fillet_face():
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder
+
+    box = primitives.make_box(4, 4, 4)
+    filleted = fillet.fillet_edge(box, first_edge(box), 0.5)
+    fillet_face = next(
+        f for f in all_faces(filleted)
+        if BRepAdaptor_Surface(f, True).GetType() == GeomAbs_Cylinder
+    )
+    healed = repair.fill_faces(filleted, [fillet_face])
+    assert math.isclose(volume_of(healed), 64.0, rel_tol=1e-6)
+
+
+def test_merge_faces_removes_redundant_coplanar_seams():
+    box_a = primitives.make_box(4, 4, 2)
+    box_b = transform.translate(primitives.make_box(4, 4, 4), 0, 0, 2)
+    fused = booleans.union(box_a, box_b)
+    assert face_count(fused) > 6, "fusing two stacked boxes should leave redundant seam faces"
+
+    merged = repair.merge_faces(fused)
+    assert face_count(merged) == 6
+    assert math.isclose(volume_of(merged), 96.0, rel_tol=1e-6)
+
+
+def test_check_interference_finds_overlapping_pair():
+    a = primitives.make_box(4, 4, 4)
+    b = transform.translate(primitives.make_box(4, 4, 4), 2, 2, 2)
+    c = transform.translate(primitives.make_box(1, 1, 1), 100, 100, 100)
+    hits = prepare.check_interference([a, b, c])
+    assert len(hits) == 1
+    i, j, volume = hits[0]
+    assert (i, j) == (0, 1)
+    assert math.isclose(volume, 8.0, rel_tol=1e-6)
+
+
+def test_check_interference_no_overlap():
+    a = primitives.make_box(1, 1, 1)
+    b = transform.translate(primitives.make_box(1, 1, 1), 5, 0, 0)
+    assert prepare.check_interference([a, b]) == []
+
+
+def test_bounding_box_of_box_primitive():
+    box = primitives.make_box(2, 3, 4)
+    x0, y0, z0, x1, y1, z1 = prepare.bounding_box(box)
+    assert math.isclose(x1 - x0, 2.0, abs_tol=1e-4)
+    assert math.isclose(y1 - y0, 3.0, abs_tol=1e-4)
+    assert math.isclose(z1 - z0, 4.0, abs_tol=1e-4)
+
+
+def test_make_enclosure_volume():
+    box = primitives.make_box(2, 2, 2)
+    enclosure = prepare.make_enclosure([box], margin=1.0)
+    assert math.isclose(volume_of(enclosure), 4**3 - 2**3, rel_tol=1e-3)
+
+
+def test_make_enclosure_requires_positive_margin():
+    box = primitives.make_box(2, 2, 2)
+    with pytest.raises(ValueError):
+        prepare.make_enclosure([box], margin=0)
+
+
+def test_share_topology_preserves_total_volume():
+    from OCP.TopAbs import TopAbs_COMPOUND
+
+    a = primitives.make_box(2, 2, 2)
+    b = transform.translate(primitives.make_box(2, 2, 2), 2, 0, 0)
+    shared = prepare.share_topology([a, b])
+    assert shared.ShapeType() == TopAbs_COMPOUND
+    assert math.isclose(volume_of(shared), 16.0, rel_tol=1e-6)
+
+
+def test_share_topology_requires_two_shapes():
+    with pytest.raises(ValueError):
+        prepare.share_topology([primitives.make_box(1, 1, 1)])
+
+
+def test_explode_solids_recovers_individual_bodies():
+    a = primitives.make_box(2, 2, 2)
+    b = transform.translate(primitives.make_box(2, 2, 2), 2, 0, 0)
+    shared = prepare.share_topology([a, b])
+    solids = prepare.explode_solids(shared)
+    assert len(solids) == 2
+    assert math.isclose(sum(volume_of(s) for s in solids), 16.0, rel_tol=1e-6)

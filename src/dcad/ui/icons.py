@@ -312,6 +312,78 @@ def _icon_sketch_plane(extrude: bool):
     return c.finish()
 
 
+def _icon_stitch():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(4, 14), _pt(24, 14))
+    p.setPen(c.accent_pen(1.6))
+    for x in (7, 11, 15, 19):
+        p.drawLine(_pt(x, 10), _pt(x + 2, 18))
+    return c.finish()
+
+
+def _icon_merge_faces():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(5, 6, 9, 16))
+    p.drawRect(QRectF(14, 6, 9, 16))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(14, 9), _pt(14, 19))
+    return c.finish()
+
+
+def _icon_fill():
+    c = _Canvas()
+    p = c.painter
+    p.drawPolygon(QPolygonF([_pt(5, 8), _pt(23, 8), _pt(23, 20), _pt(15, 20), _pt(15, 14), _pt(9, 14), _pt(9, 20), _pt(5, 20)]))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_ACCENT)
+    p.drawRect(QRectF(9, 14, 6, 6))
+    return c.finish()
+
+
+def _icon_interference():
+    c = _Canvas()
+    p = c.painter
+    rect_a, rect_b = QRectF(4, 9, 13, 13), QRectF(11, 9, 13, 13)
+    p.drawEllipse(rect_a)
+    p.drawEllipse(rect_b)
+    path_a, path_b = QPainterPath(), QPainterPath()
+    path_a.addEllipse(rect_a)
+    path_b.addEllipse(rect_b)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor("#B02A2A"))
+    p.drawPath(path_a.intersected(path_b))
+    return c.finish()
+
+
+def _icon_enclosure():
+    c = _Canvas()
+    p = c.painter
+    pen = QPen(_COLOR)
+    pen.setStyle(Qt.PenStyle.DashLine)
+    pen.setWidthF(1.4)
+    p.setPen(pen)
+    p.drawRect(QRectF(3, 3, 22, 22))
+    p.setPen(c.painter.pen())
+    solid_pen = QPen(_COLOR)
+    solid_pen.setWidthF(1.8)
+    p.setPen(solid_pen)
+    p.drawRect(QRectF(9, 9, 10, 10))
+    return c.finish()
+
+
+def _icon_share_topology():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(4, 8, 10, 12))
+    p.drawRect(QRectF(14, 8, 10, 12))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_ACCENT)
+    p.drawEllipse(QRectF(12, 12, 4, 4))
+    return c.finish()
+
+
 _BUILDERS = {
     "select": _icon_select,
     "box": _icon_box,
@@ -343,6 +415,12 @@ _BUILDERS = {
     "measure": _icon_measure,
     "sketch_extrude_plane": lambda: _icon_sketch_plane(True),
     "sketch_revolve_plane": lambda: _icon_sketch_plane(False),
+    "stitch": _icon_stitch,
+    "merge_faces": _icon_merge_faces,
+    "fill": _icon_fill,
+    "interference": _icon_interference,
+    "enclosure": _icon_enclosure,
+    "share_topology": _icon_share_topology,
 }
 
 _cache = {}
