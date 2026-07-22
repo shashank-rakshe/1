@@ -39,8 +39,9 @@ assets.
 - **Move / Rotate / Copy** — select one solid, then run the tool and enter
   the offset/angle (Rotate is about the Z axis through the origin in v1).
 - **Sketch (Extrude) / Sketch (Revolve)** — toggle one, pick Line/Rectangle/
-  Circle, click points directly in the viewport (a live preview follows
-  the mouse), then **Close Sketch**. This matches SpaceClaim's real
+  Circle/Polygon/Ellipse/3-Point Circle/3-Point Arc, click points directly
+  in the viewport (a live preview follows the mouse), then **Close Sketch**.
+  This matches SpaceClaim's real
   behavior: closing a sketch turns each closed profile into a flat,
   zero-thickness **Surface** — drawing a circle gives you a flat disc, not
   a cylinder. Select the Surface and **Pull** it to thicken it into a solid,
@@ -92,12 +93,13 @@ src/dcad/
 
 Working: primitive creation, boolean ops, planar-face pull/push,
 fillet/chamfer, move/rotate/copy, undo/redo, interactive click-to-sketch
-drawing (Line/Rectangle/Circle) plus a dialog-based alternative, sketch
-extrude and revolve, measure (distance/length/area/volume), STEP/IGES
-import-export, native project save/load, a ribbon UI with a Structure
-tree, orbit/pan/zoom viewport with solid/face/edge picking. 46 kernel
-tests + a full end-to-end GUI smoke test (including real synthesized
-mouse clicks) cover all of it.
+drawing (Line/Rectangle/Circle/Polygon/Ellipse/3-Point Circle/3-Point Arc)
+plus a dialog-based alternative, sketch extrude and revolve, measure
+(distance/length/area/volume), STEP/IGES import-export, native project
+save/load, a ribbon UI with original icons and a Structure tree,
+orbit/pan/zoom viewport with solid/face/edge picking. 53 kernel tests + a
+full end-to-end GUI smoke test (including real synthesized mouse clicks)
+cover all of it.
 
 The interactive sketcher draws real geometry as you click, but there's no
 constraint solver — no dimensional constraints (exact length/angle), no
@@ -105,9 +107,14 @@ geometric constraints (parallel, coincident, tangent), no dragging to
 adjust an already-placed point. That's the natural next layer if wanted:
 it's what separates "click to draw" from a true parametric sketcher.
 
-Not yet built (real SpaceClaim features, in progress): sketch constraints,
-assemblies, sheet metal, drawings, ribbon icon artwork (original, not
-SpaceClaim's).
+SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Measure,
+Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal, Tools,
+Display, Keyshot). This project covers the core CAD-modeling ones
+(Design/Sketch/Measure, here "Inspect"). Not yet built: Repair (Fill —
+heal a removed face by extending its neighbors), Assembly (multi-part),
+Detail (2D drawings), Sheet Metal, sketch constraints. Out of scope:
+Facets/Mesh/Workbench (ANSYS's simulation pipeline) and Keyshot (a
+separate third-party renderer) — those aren't CAD modeling.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 Siemens format — no open reader exists); a Parasolid kernel (commercial,
