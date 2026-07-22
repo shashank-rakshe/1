@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch
 from dcad.kernel.document import Document
 
 
@@ -199,3 +199,57 @@ def test_project_save_load_roundtrip(tmp_path):
     assert [o.name for o in loaded.objects] == ["Box1", "Cyl1"]
     assert math.isclose(volume_of(loaded.objects[0].shape), volume_of(doc.objects[0].shape), rel_tol=1e-6)
     assert math.isclose(volume_of(loaded.objects[1].shape), volume_of(doc.objects[1].shape), rel_tol=1e-6)
+
+
+def test_sketch_rectangle_extrude_volume():
+    profile = sketch.rectangle_profile(0, 0, 2, 3)
+    box = sketch.extrude(profile, 4)
+    assert math.isclose(volume_of(box), 24.0, rel_tol=1e-6)
+
+
+def test_sketch_rectangle_requires_nondegenerate_corners():
+    with pytest.raises(ValueError):
+        sketch.rectangle_profile(0, 0, 0, 5)
+
+
+def test_sketch_circle_extrude_volume():
+    profile = sketch.circle_profile(0, 0, 1)
+    cyl = sketch.extrude(profile, 5)
+    assert math.isclose(volume_of(cyl), math.pi * 1**2 * 5, rel_tol=1e-6)
+
+
+def test_sketch_extrude_zero_height_raises():
+    profile = sketch.circle_profile(0, 0, 1)
+    with pytest.raises(ValueError):
+        sketch.extrude(profile, 0)
+
+
+def test_sketch_extrude_negative_height_still_produces_volume():
+    profile = sketch.rectangle_profile(0, 0, 2, 2)
+    box = sketch.extrude(profile, -3)
+    assert math.isclose(volume_of(box), 12.0, rel_tol=1e-6)
+
+
+def test_revolve_profile_full_turn_volume():
+    profile = sketch.revolve_profile_rectangle(1, 0, 2, 3)
+    ring = sketch.revolve(profile, 360)
+    expected = math.pi * (2**2 - 1**2) * 3
+    assert math.isclose(volume_of(ring), expected, rel_tol=1e-6)
+
+
+def test_revolve_profile_half_turn_is_half_volume():
+    profile = sketch.revolve_profile_rectangle(1, 0, 2, 3)
+    full = sketch.revolve(profile, 360)
+    half = sketch.revolve(profile, 180)
+    assert math.isclose(volume_of(half), volume_of(full) / 2, rel_tol=1e-6)
+
+
+def test_revolve_profile_invalid_radius_raises():
+    with pytest.raises(ValueError):
+        sketch.revolve_profile_rectangle(-1, 0, 2, 3)
+
+
+def test_revolve_invalid_angle_raises():
+    profile = sketch.revolve_profile_rectangle(1, 0, 2, 3)
+    with pytest.raises(ValueError):
+        sketch.revolve(profile, 400)

@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
@@ -52,6 +52,11 @@ class MainWindow(QMainWindow):
         tb.addAction(self._action("Box", self.add_box))
         tb.addAction(self._action("Cylinder", self.add_cylinder))
         tb.addAction(self._action("Sphere", self.add_sphere))
+        tb.addSeparator()
+
+        tb.addAction(self._action("Sketch Rect+Extrude", self.do_sketch_rect_extrude))
+        tb.addAction(self._action("Sketch Circle+Extrude", self.do_sketch_circle_extrude))
+        tb.addAction(self._action("Sketch Revolve", self.do_sketch_revolve))
         tb.addSeparator()
         tb.addAction(self._action("Union", self.do_union))
         tb.addAction(self._action("Subtract", self.do_subtract))
@@ -182,6 +187,74 @@ class MainWindow(QMainWindow):
 
     def do_intersect(self):
         self._apply_boolean(booleans.intersect, "Intersect")
+
+    # -- sketch (rectangle/circle profile) + extrude / revolve ------------
+    def _prompt_floats(self, title: str, label: str, defaults: tuple):
+        text, ok = QInputDialog.getText(
+            self, title, label, text=", ".join(f"{v:g}" for v in defaults),
+        )
+        if not ok:
+            return None
+        try:
+            values = tuple(float(v.strip()) for v in text.split(","))
+        except ValueError:
+            QMessageBox.warning(self, title, f"Enter {len(defaults)} comma-separated numbers")
+            return None
+        if len(values) != len(defaults):
+            QMessageBox.warning(self, title, f"Enter exactly {len(defaults)} comma-separated numbers")
+            return None
+        return values
+
+    def do_sketch_rect_extrude(self):
+        corners = self._prompt_floats("Sketch Rectangle", "x0, y0, x1, y1:", (0.0, 0.0, 2.0, 2.0))
+        if corners is None:
+            return
+        height, ok = QInputDialog.getDouble(self, "Extrude", "Height:", 2.0, -1000.0, 1000.0, 3)
+        if not ok:
+            return
+        try:
+            profile = sketch.rectangle_profile(*corners)
+            solid = sketch.extrude(profile, height)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sketch Rectangle+Extrude failed", str(exc))
+            return
+        self.document.snapshot()
+        self._add_to_scene(solid, name="SketchExtrude")
+
+    def do_sketch_circle_extrude(self):
+        params = self._prompt_floats("Sketch Circle", "cx, cy, radius:", (0.0, 0.0, 1.0))
+        if params is None:
+            return
+        height, ok = QInputDialog.getDouble(self, "Extrude", "Height:", 2.0, -1000.0, 1000.0, 3)
+        if not ok:
+            return
+        try:
+            profile = sketch.circle_profile(*params)
+            solid = sketch.extrude(profile, height)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sketch Circle+Extrude failed", str(exc))
+            return
+        self.document.snapshot()
+        self._add_to_scene(solid, name="SketchExtrude")
+
+    def do_sketch_revolve(self):
+        params = self._prompt_floats(
+            "Sketch Revolve Profile", "r0, z0, r1, z1 (radius/height rectangle in the XZ plane):",
+            (1.0, 0.0, 2.0, 2.0),
+        )
+        if params is None:
+            return
+        angle, ok = QInputDialog.getDouble(self, "Revolve", "Angle (degrees, about Z axis):", 360.0, 0.001, 360.0, 2)
+        if not ok:
+            return
+        try:
+            profile = sketch.revolve_profile_rectangle(*params)
+            solid = sketch.revolve(profile, angle)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sketch Revolve failed", str(exc))
+            return
+        self.document.snapshot()
+        self._add_to_scene(solid, name="SketchRevolve")
 
     # -- move / rotate / copy -------------------------------------------
     def _prompt_xyz(self, title: str, default=(0.0, 0.0, 0.0)):

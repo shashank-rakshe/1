@@ -122,6 +122,27 @@ def run():
                 window._apply_edge_op(chamfer_obj, edge2, "chamfer")
         except Exception as exc:
             errors.append(("fillet_chamfer", exc))
+        QTimer.singleShot(200, step_sketch)
+
+    def step_sketch():
+        try:
+            count_before = len(window.document.objects)
+            with patch.object(QInputDialog, "getText", return_value=("0, 0, 2, 3", True)), \
+                 patch.object(QInputDialog, "getDouble", return_value=(4.0, True)):
+                window.do_sketch_rect_extrude()
+            assert len(window.document.objects) == count_before + 1
+
+            with patch.object(QInputDialog, "getText", return_value=("0, 0, 1", True)), \
+                 patch.object(QInputDialog, "getDouble", return_value=(5.0, True)):
+                window.do_sketch_circle_extrude()
+            assert len(window.document.objects) == count_before + 2
+
+            with patch.object(QInputDialog, "getText", return_value=("1, 0, 2, 3", True)), \
+                 patch.object(QInputDialog, "getDouble", return_value=(360.0, True)):
+                window.do_sketch_revolve()
+            assert len(window.document.objects) == count_before + 3
+        except Exception as exc:
+            errors.append(("sketch", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():
