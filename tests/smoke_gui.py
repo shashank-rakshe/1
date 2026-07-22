@@ -7,6 +7,7 @@ real do_move/do_rotate/do_copy/_apply_edge_op code paths run end-to-end
 without blocking on user input.
 """
 
+import math
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -256,6 +257,65 @@ def run():
             assert window.active_tool == "select"
         except Exception as exc:
             errors.append(("measure", exc))
+        QTimer.singleShot(200, step_surface_workflow)
+
+    def step_surface_workflow():
+        # SpaceClaim behavior: closing a sketch makes a flat Surface (zero
+        # volume), not a solid. Pull (or Revolve) then thickens/spins it
+        # into a real solid. Verify both paths end-to-end.
+        try:
+            from OCP.TopAbs import TopAbs_FACE, TopAbs_SOLID
+
+            def volume_of(shape):
+                from OCP.BRepGProp import BRepGProp
+                from OCP.GProp import GProp_GProps
+
+                props = GProp_GProps()
+                BRepGProp.VolumeProperties_s(shape, props)
+                return props.Mass()
+
+            # -- Pull path: circle sketch on the Extrude plane --
+            window.sketch_extrude_action.setChecked(True)
+            window.sketch_entity_actions["circle"].setChecked(True)
+            window._on_sketch_clicked(20, 20, 0)
+            window._on_sketch_clicked(21, 20, 0)  # radius 1
+            assert len(window.interactive_sketch_profiles) == 1
+            window.finish_interactive_sketch()
+
+            surface = by_name(window, "Surface")
+            assert surface.shape.ShapeType() == TopAbs_FACE, "Close Sketch should produce a flat Surface, not a solid"
+            assert math.isclose(volume_of(surface.shape), 0.0, abs_tol=1e-9)
+
+            select_by_ids(window, [surface.id])
+            window._tool_actions["pull"].setChecked(True)
+            with patch.object(QInputDialog, "getDouble", return_value=(3.0, True)):
+                window._apply_pull(surface, surface.shape)
+            window._tool_actions["pull"].setChecked(False)
+
+            thickened = window.document.get(surface.id)
+            assert thickened.shape.ShapeType() == TopAbs_SOLID, "Pull on a Surface should thicken it into a solid"
+            assert volume_of(thickened.shape) > 0
+
+            # -- Revolve path: rectangle sketch on the Revolve plane --
+            window.sketch_revolve_action.setChecked(True)
+            window.sketch_entity_actions["rect"].setChecked(True)
+            window._on_sketch_clicked(1, 0, 0)
+            window._on_sketch_clicked(2, 0, 3)
+            assert len(window.interactive_sketch_profiles) == 1
+            window.finish_interactive_sketch()
+
+            surfaces = [o for o in window.document.objects if o.name == "Surface"]
+            revolve_surface = surfaces[-1]
+            assert revolve_surface.shape.ShapeType() == TopAbs_FACE
+
+            select_by_ids(window, [revolve_surface.id])
+            with patch.object(QInputDialog, "getDouble", return_value=(360.0, True)):
+                window.do_revolve_surface()
+            revolved = window.document.get(revolve_surface.id)
+            assert revolved.shape.ShapeType() == TopAbs_SOLID, "Revolve on a Surface should spin it into a solid"
+            assert volume_of(revolved.shape) > 0
+        except Exception as exc:
+            errors.append(("surface_workflow", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

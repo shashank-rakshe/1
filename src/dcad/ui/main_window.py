@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         edit_group.add_action(self._action("Move", self.do_move))
         edit_group.add_action(self._action("Rotate", self.do_rotate))
         edit_group.add_action(self._action("Copy", self.do_copy))
+        edit_group.add_action(self._action("Revolve", self.do_revolve_surface))
 
         combine_group = design_tab.add_group("Combine")
         combine_group.add_action(self._action("Merge", self.do_union))
@@ -513,33 +514,21 @@ class MainWindow(QMainWindow):
             self._exit_interactive_sketch()
 
     def finish_interactive_sketch(self):
+        # Matches SpaceClaim's real sketch workflow: closing a sketch turns
+        # each closed profile into a flat, zero-thickness Surface object --
+        # it does NOT extrude/revolve immediately. Use Pull on a Surface's
+        # face to thicken it into a solid, or the Revolve tool to spin it
+        # into one (see do_pull_or_thicken / do_revolve_surface).
         if not self.interactive_sketch_active:
             return
         if not self.interactive_sketch_profiles:
             QMessageBox.information(self, "Finish Sketch", "Sketch at least one closed profile first (Rectangle/Circle, or Line + double-click).")
             return
-        mode = self.interactive_sketch_finish_mode
-        if mode == "extrude":
-            height, ok = QInputDialog.getDouble(self, "Extrude", "Height:", 2.0, -1000.0, 1000.0, 3)
-            if not ok:
-                return
-            op, name = (lambda face: sketch.extrude(face, height)), "SketchExtrude"
-        else:
-            angle, ok = QInputDialog.getDouble(self, "Revolve", "Angle (degrees):", 360.0, 0.001, 360.0, 2)
-            if not ok:
-                return
-            op, name = (lambda face: sketch.revolve(face, angle)), "SketchRevolve"
-
         profiles = list(self.interactive_sketch_profiles)
         self.document.snapshot()
         self._exit_interactive_sketch()
         for face in profiles:
-            try:
-                solid = op(face)
-            except Exception as exc:
-                QMessageBox.warning(self, "Sketch finish failed", str(exc))
-                continue
-            self._add_to_scene(solid, name=name)
+            self._add_to_scene(face, name="Surface")
 
     # -- move / rotate / copy -------------------------------------------
     def _prompt_xyz(self, title: str, default=(0.0, 0.0, 0.0)):
@@ -582,6 +571,30 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
         self._sync_viewport()
         self.statusBar().showMessage(f"Rotated {obj.name} by {angle:g} deg")
+
+    def do_revolve_surface(self):
+        """Spins a standalone Surface (a flat, closed sketch profile that
+        hasn't been Pulled into a solid yet) about the Z axis through the
+        origin -- the other way (besides Pull) to turn a Surface solid."""
+        obj = self._selected_single()
+        if obj is None:
+            return
+        if obj.shape.ShapeType() != TopAbs_FACE:
+            QMessageBox.information(self, "Revolve", "Select a Surface (a flat sketch profile, not yet a solid) to revolve.")
+            return
+        angle, ok = QInputDialog.getDouble(self, "Revolve", "Angle (degrees, about Z axis through origin):", 360.0, 0.001, 360.0, 2)
+        if not ok:
+            return
+        try:
+            new_shape = sketch.revolve(obj.shape, angle)
+        except Exception as exc:
+            QMessageBox.warning(self, "Revolve failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(obj, new_shape)
+        self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Revolved {obj.name} by {angle:g} deg")
 
     def do_copy(self):
         obj = self._selected_single()
@@ -654,14 +667,23 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Measure: distance between faces = {distance:.4g}")
 
     def _apply_pull(self, obj, face):
-        distance, ok = QInputDialog.getDouble(
-            self, "Pull/Push face", "Distance (positive = pull out, negative = push in):",
-            1.0, -1000.0, 1000.0, 3,
+        is_bare_surface = obj.shape.ShapeType() == TopAbs_FACE
+        prompt = (
+            "Thickness (the surface becomes a solid this thick):"
+            if is_bare_surface
+            else "Distance (positive = pull out, negative = push in):"
         )
+        distance, ok = QInputDialog.getDouble(self, "Pull/Push face", prompt, 1.0, -1000.0, 1000.0, 3)
         if not ok or distance == 0:
             return
         try:
-            new_shape = direct_edit.pull_face(obj.shape, face, distance)
+            if is_bare_surface:
+                # Pulling a standalone Surface thickens it into a solid
+                # (SpaceClaim's real behavior), rather than fusing/cutting
+                # against an existing solid.
+                new_shape = sketch.extrude(face, distance)
+            else:
+                new_shape = direct_edit.pull_face(obj.shape, face, distance)
         except Exception as exc:
             QMessageBox.warning(self, "Pull/Push failed", str(exc))
             return
@@ -669,7 +691,8 @@ class MainWindow(QMainWindow):
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
         self._sync_viewport()
-        self.statusBar().showMessage(f"Pulled {obj.name} by {distance:g}")
+        verb = "Thickened" if is_bare_surface else "Pulled"
+        self.statusBar().showMessage(f"{verb} {obj.name} by {distance:g}")
 
     def _apply_edge_op(self, obj, edge, tool: str):
         label = "Fillet radius" if tool == "fillet" else "Chamfer distance"
