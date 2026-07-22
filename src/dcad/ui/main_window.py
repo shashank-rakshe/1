@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         self.interactive_sketch_profiles = []
         self._interactive_sketch_shape_ids = []
         self.sketch_entity_actions = {}
+        self._polygon_sides = 6
 
         self.setStyleSheet(STYLESHEET)
         self._build_ribbon()
@@ -137,7 +138,15 @@ class MainWindow(QMainWindow):
 
         sketch_tab = self.ribbon.add_tab("Sketch")
         draw_group = sketch_tab.add_group("Draw")
-        for name, label in [("line", "Line"), ("rect", "Rectangle"), ("circle", "Circle")]:
+        for name, label in [
+            ("line", "Line"),
+            ("rect", "Rectangle"),
+            ("circle", "Circle"),
+            ("polygon", "Polygon"),
+            ("ellipse", "Ellipse"),
+            ("circle3pt", "3-Point\nCircle"),
+            ("arc3pt", "3-Point\nArc"),
+        ]:
             action = QAction(label, self)
             action.setCheckable(True)
             action.toggled.connect(lambda checked, n=name: self._on_sketch_entity_toggled(n, checked))
@@ -427,19 +436,35 @@ class MainWindow(QMainWindow):
             self.interactive_sketch_points = []
             self.viewport.viewer.set_preview(None)
 
+    # tool name -> number of points needed before it self-finalizes (None = line/open-ended, closed via double-click)
+    _SKETCH_TOOL_POINT_COUNTS = {
+        "rect": 2, "circle": 2, "polygon": 2, "ellipse": 3, "circle3pt": 3, "arc3pt": 3,
+    }
+
+    def _build_sketch_preview(self, tool: str, pts: list):
+        normal = self._current_sketch_normal()
+        if tool == "rect" and len(pts) == 2:
+            return sketch.polygon_profile(sketch.rectangle_points_from_corners(pts[0], pts[1]))
+        if tool == "circle" and len(pts) == 2:
+            return sketch.circle_profile_3d(pts[0], normal, sketch.distance(pts[0], pts[1]))
+        if tool == "polygon" and len(pts) == 2:
+            return sketch.regular_polygon_profile(pts[0], pts[1], normal, self._polygon_sides)
+        if tool == "ellipse" and len(pts) == 3:
+            return sketch.ellipse_profile_3d(pts[0], pts[1], sketch.distance(pts[0], pts[2]), normal)
+        if tool == "circle3pt" and len(pts) == 3:
+            return sketch.three_point_circle_profile(pts[0], pts[1], pts[2])
+        if tool == "arc3pt" and len(pts) == 3:
+            return sketch.three_point_arc_segment_profile(pts[0], pts[1], pts[2])
+        if tool == "line" and len(pts) >= 2:
+            return sketch.open_polyline_wire(pts)
+        return None
+
     def _on_sketch_hover(self, x: float, y: float, z: float):
         if not self.interactive_sketch_active or not self.interactive_sketch_tool:
             return
         pts = self.interactive_sketch_points + [(x, y, z)]
-        preview = None
         try:
-            if self.interactive_sketch_tool == "rect" and len(pts) == 2:
-                preview = sketch.polygon_profile(sketch.rectangle_points_from_corners(pts[0], pts[1]))
-            elif self.interactive_sketch_tool == "circle" and len(pts) == 2:
-                radius = sketch.distance(pts[0], pts[1])
-                preview = sketch.circle_profile_3d(pts[0], self._current_sketch_normal(), radius)
-            elif self.interactive_sketch_tool == "line" and len(pts) >= 2:
-                preview = sketch.open_polyline_wire(pts)
+            preview = self._build_sketch_preview(self.interactive_sketch_tool, pts)
         except Exception:
             preview = None  # degenerate in-progress geometry (e.g. zero-size); just skip the preview
         self.viewport.viewer.set_preview(preview)
@@ -451,17 +476,21 @@ class MainWindow(QMainWindow):
         pts = self.interactive_sketch_points
         pts.append((x, y, z))
         tool = self.interactive_sketch_tool
-        try:
-            if tool == "rect" and len(pts) == 2:
-                self._finalize_sketch_profile(sketch.polygon_profile(sketch.rectangle_points_from_corners(pts[0], pts[1])))
-            elif tool == "circle" and len(pts) == 2:
-                radius = sketch.distance(pts[0], pts[1])
-                self._finalize_sketch_profile(sketch.circle_profile_3d(pts[0], self._current_sketch_normal(), radius))
-            elif tool == "line":
-                self.statusBar().showMessage(f"Sketch: {len(pts)} point(s) placed — double-click to close the polygon")
-        except Exception as exc:
-            QMessageBox.warning(self, "Sketch", str(exc))
-            self.interactive_sketch_points = []
+        needed = self._SKETCH_TOOL_POINT_COUNTS.get(tool)
+
+        if tool == "polygon" and len(pts) == 2:
+            sides, ok = QInputDialog.getInt(self, "Polygon", "Number of sides:", self._polygon_sides, 3, 32)
+            if ok:
+                self._polygon_sides = sides
+
+        if needed is not None and len(pts) == needed:
+            try:
+                self._finalize_sketch_profile(self._build_sketch_preview(tool, pts))
+            except Exception as exc:
+                QMessageBox.warning(self, "Sketch", str(exc))
+                self.interactive_sketch_points = []
+        elif tool == "line":
+            self.statusBar().showMessage(f"Sketch: {len(pts)} point(s) placed — double-click to close the polygon")
 
     def _on_sketch_finish_entity(self):
         if not self.interactive_sketch_active or self.interactive_sketch_tool != "line":

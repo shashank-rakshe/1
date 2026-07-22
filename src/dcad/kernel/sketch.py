@@ -6,7 +6,8 @@ import math
 
 from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
 from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
-from OCP.gp import gp_Pnt, gp_Vec, gp_Circ, gp_Ax2, gp_Ax1, gp_Dir
+from OCP.GC import GC_MakeArcOfCircle, GC_MakeCircle
+from OCP.gp import gp_Pnt, gp_Vec, gp_Circ, gp_Elips, gp_Ax2, gp_Ax1, gp_Dir
 from OCP.TopoDS import TopoDS_Face, TopoDS_Shape, TopoDS_Wire
 
 
@@ -100,6 +101,87 @@ def circle_profile_3d(center, normal, radius: float) -> TopoDS_Face:
 
 def distance(p0, p1) -> float:
     return math.dist(p0, p1)
+
+
+def _sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _normalize(v):
+    length = math.sqrt(sum(c * c for c in v))
+    if length < 1e-12:
+        raise ValueError("degenerate direction (points too close together)")
+    return (v[0] / length, v[1] / length, v[2] / length)
+
+
+def regular_polygon_profile(center, vertex, normal, num_sides: int = 6) -> TopoDS_Face:
+    """A regular N-gon, matching SpaceClaim's Polygon sketch tool: center
+    click + a click for the first vertex (fixing the circumradius and
+    starting angle) + a side count."""
+    if num_sides < 3:
+        raise ValueError("a polygon needs at least 3 sides")
+    radius = distance(center, vertex)
+    if radius <= 0:
+        raise ValueError("polygon radius must be positive")
+    u = _normalize(_sub(vertex, center))
+    v = _normalize(_cross(normal, u))
+    points = []
+    for i in range(num_sides):
+        theta = 2 * math.pi * i / num_sides
+        c = math.cos(theta)
+        s = math.sin(theta)
+        points.append((
+            center[0] + radius * (c * u[0] + s * v[0]),
+            center[1] + radius * (c * u[1] + s * v[1]),
+            center[2] + radius * (c * u[2] + s * v[2]),
+        ))
+    return polygon_profile(points)
+
+
+def ellipse_profile_3d(center, major_axis_point, minor_radius: float, normal) -> TopoDS_Face:
+    """SpaceClaim's Ellipse tool: center click, major-axis-endpoint click,
+    then a minor radius."""
+    major_radius = distance(center, major_axis_point)
+    if major_radius <= 0 or minor_radius <= 0:
+        raise ValueError("ellipse radii must be positive")
+    if minor_radius > major_radius:
+        major_radius, minor_radius = minor_radius, major_radius
+    x_dir = _normalize(_sub(major_axis_point, center))
+    axis = gp_Ax2(gp_Pnt(*center), gp_Dir(*normal), gp_Dir(*x_dir))
+    elips = gp_Elips(axis, major_radius, minor_radius)
+    edge = BRepBuilderAPI_MakeEdge(elips).Edge()
+    wire = BRepBuilderAPI_MakeWire(edge).Wire()
+    return BRepBuilderAPI_MakeFace(wire, True).Face()
+
+
+def three_point_circle_profile(p1, p2, p3) -> TopoDS_Face:
+    """SpaceClaim's Three-Point Circle tool: a circle through 3 points."""
+    circ = GC_MakeCircle(gp_Pnt(*p1), gp_Pnt(*p2), gp_Pnt(*p3)).Value()
+    edge = BRepBuilderAPI_MakeEdge(circ).Edge()
+    wire = BRepBuilderAPI_MakeWire(edge).Wire()
+    return BRepBuilderAPI_MakeFace(wire, True).Face()
+
+
+def three_point_arc_segment_profile(p1, p2, p3) -> TopoDS_Face:
+    """SpaceClaim's Three-Point Arc tool draws one arc edge (start p1,
+    through p2, end p3) as part of a larger multi-segment sketch. This
+    tool's click-and-close-immediately model doesn't support multi-segment
+    profiles yet, so the arc is closed with a straight chord back to its
+    start, producing the circular-segment ("D-shaped") region instead --
+    a deliberate simplification, not what a bare 3-point arc alone is in
+    real SpaceClaim.
+    """
+    arc = GC_MakeArcOfCircle(gp_Pnt(*p1), gp_Pnt(*p2), gp_Pnt(*p3)).Value()
+    arc_edge = BRepBuilderAPI_MakeEdge(arc).Edge()
+    chord_edge = BRepBuilderAPI_MakeEdge(gp_Pnt(*p3), gp_Pnt(*p1)).Edge()
+    wire_builder = BRepBuilderAPI_MakeWire()
+    wire_builder.Add(arc_edge)
+    wire_builder.Add(chord_edge)
+    return BRepBuilderAPI_MakeFace(wire_builder.Wire(), True).Face()
 
 
 def open_polyline_wire(points: list) -> TopoDS_Wire:

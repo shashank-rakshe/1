@@ -316,6 +316,47 @@ def run():
             assert volume_of(revolved.shape) > 0
         except Exception as exc:
             errors.append(("surface_workflow", exc))
+        QTimer.singleShot(200, step_new_sketch_tools)
+
+    def step_new_sketch_tools():
+        try:
+            count_before = len(window.document.objects)
+            window.sketch_extrude_action.setChecked(True)
+
+            window.sketch_entity_actions["polygon"].setChecked(True)
+            with patch.object(QInputDialog, "getInt", return_value=(5, True)):
+                window._on_sketch_clicked(30, 30, 0)
+                window._on_sketch_clicked(32, 30, 0)  # radius 2, pentagon
+            assert len(window.interactive_sketch_profiles) == 1
+
+            window.sketch_entity_actions["ellipse"].setChecked(True)
+            window._on_sketch_clicked(40, 40, 0)
+            window._on_sketch_clicked(43, 40, 0)  # major radius 3
+            window._on_sketch_hover(40, 41, 0)  # live preview path with 2 points placed
+            window._on_sketch_clicked(40, 41, 0)  # minor radius 1
+            assert len(window.interactive_sketch_profiles) == 2
+
+            window.sketch_entity_actions["circle3pt"].setChecked(True)
+            window._on_sketch_clicked(51, 50, 0)
+            window._on_sketch_clicked(50, 51, 0)
+            window._on_sketch_clicked(49, 50, 0)
+            assert len(window.interactive_sketch_profiles) == 3
+
+            window.sketch_entity_actions["arc3pt"].setChecked(True)
+            window._on_sketch_clicked(61, 60, 0)
+            window._on_sketch_clicked(60, 61, 0)
+            window._on_sketch_clicked(59, 60, 0)
+            assert len(window.interactive_sketch_profiles) == 4
+
+            window.finish_interactive_sketch()
+            assert len(window.document.objects) == count_before + 4, "4 new profiles -> 4 new Surface objects"
+
+            from OCP.TopAbs import TopAbs_FACE
+
+            for obj in window.document.objects[-4:]:
+                assert obj.shape.ShapeType() == TopAbs_FACE, "new sketch tools should also produce flat Surfaces"
+        except Exception as exc:
+            errors.append(("new_sketch_tools", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

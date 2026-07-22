@@ -345,3 +345,41 @@ def test_measure_describe_edge_face_solid():
     assert measure.describe(first_edge(box)).startswith("Length")
     assert measure.describe(first_face(box)).startswith("Area")
     assert measure.describe(box).startswith("Volume")
+
+
+def test_regular_polygon_profile_hexagon_area():
+    hexagon = sketch.regular_polygon_profile((0, 0, 0), (2, 0, 0), (0, 0, 1), 6)
+    expected = 0.5 * 6 * 2**2 * math.sin(2 * math.pi / 6)
+    assert math.isclose(measure.area_of_face(hexagon), expected, rel_tol=1e-6)
+
+
+def test_regular_polygon_profile_requires_three_sides():
+    with pytest.raises(ValueError):
+        sketch.regular_polygon_profile((0, 0, 0), (1, 0, 0), (0, 0, 1), 2)
+
+
+def test_regular_polygon_profile_extrudes_to_expected_volume():
+    hexagon = sketch.regular_polygon_profile((0, 0, 0), (2, 0, 0), (0, 0, 1), 6)
+    solid = sketch.extrude(hexagon, 5)
+    expected_area = 0.5 * 6 * 2**2 * math.sin(2 * math.pi / 6)
+    assert math.isclose(volume_of(solid), expected_area * 5, rel_tol=1e-6)
+
+
+def test_ellipse_profile_3d_area():
+    ellipse = sketch.ellipse_profile_3d((0, 0, 0), (3, 0, 0), 1.5, (0, 0, 1))
+    assert math.isclose(measure.area_of_face(ellipse), math.pi * 3 * 1.5, rel_tol=1e-6)
+
+
+def test_ellipse_profile_3d_invalid_radius_raises():
+    with pytest.raises(ValueError):
+        sketch.ellipse_profile_3d((0, 0, 0), (3, 0, 0), 0, (0, 0, 1))
+
+
+def test_three_point_circle_profile_area():
+    circle = sketch.three_point_circle_profile((1, 0, 0), (0, 1, 0), (-1, 0, 0))
+    assert math.isclose(measure.area_of_face(circle), math.pi * 1**2, rel_tol=1e-6)
+
+
+def test_three_point_arc_segment_profile_half_circle_area():
+    segment = sketch.three_point_arc_segment_profile((1, 0, 0), (0, 1, 0), (-1, 0, 0))
+    assert math.isclose(measure.area_of_face(segment), 0.5 * math.pi * 1**2, rel_tol=1e-6)
