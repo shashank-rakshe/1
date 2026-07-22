@@ -40,13 +40,17 @@ assets.
   the offset/angle (Rotate is about the Z axis through the origin in v1).
 - **Sketch (Extrude) / Sketch (Revolve)** — toggle one, pick Line/Rectangle/
   Circle, click points directly in the viewport (a live preview follows
-  the mouse), then **Finish Sketch** to pull every profile drawn into a
-  solid. Line: click each point, double-click to close the polygon.
-  Extrude sketches on the XY plane; Revolve sketches on the XZ plane
-  (about the Z axis) — mixing them up produces a zero-volume result, so
-  the tool keeps them separate. **Cancel Sketch** discards without adding
-  anything. There's also a dialog-based version of the same idea (Sketch
-  Rect+Extrude / Sketch Circle+Extrude / Sketch Revolve) for typing exact
+  the mouse), then **Close Sketch**. This matches SpaceClaim's real
+  behavior: closing a sketch turns each closed profile into a flat,
+  zero-thickness **Surface** — drawing a circle gives you a flat disc, not
+  a cylinder. Select the Surface and **Pull** it to thicken it into a solid,
+  or **Revolve** it to spin it into one about the Z axis. Line: click each
+  point, double-click to close the polygon. Extrude sketches on the XY
+  plane; Revolve sketches on the XZ plane — mixing them up produces a
+  zero-volume result, so the tool keeps them separate. **Cancel Sketch**
+  discards without adding anything. There's also a one-step dialog version
+  (Sketch Rect+Extrude / Sketch Circle+Extrude / Sketch Revolve) that
+  skips the Surface stage and goes straight to a solid, for typing exact
   coordinates instead of clicking.
 - **Measure** (Inspect tab) — click a face to see its area, click a second
   face to see the distance between them.
