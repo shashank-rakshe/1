@@ -21,11 +21,12 @@ python main.py
 
 ## UI
 
-A ribbon (Design/Sketch tabs, labeled button groups, a File menu) plus a
-Structure tree on the left listing every solid — click a tree item to select
-it in the viewport. This matches SpaceClaim's actual UI *paradigm* and
-terminology (Pull, Merge, Combine, Sketch Mode); it is not a pixel copy of
-SpaceClaim's artwork or branding, which are Siemens' proprietary assets.
+A ribbon (Design/Sketch/Inspect tabs, labeled button groups, a File menu)
+plus a Structure tree on the left listing every solid — click a tree item to
+select it in the viewport. This matches SpaceClaim's actual UI *paradigm* and
+terminology (Pull, Merge, Combine, Sketch Mode, Inspect); it is not a pixel
+copy of SpaceClaim's artwork or branding, which are Siemens' proprietary
+assets.
 
 ## Using the app
 
@@ -47,6 +48,8 @@ SpaceClaim's artwork or branding, which are Siemens' proprietary assets.
   anything. There's also a dialog-based version of the same idea (Sketch
   Rect+Extrude / Sketch Circle+Extrude / Sketch Revolve) for typing exact
   coordinates instead of clicking.
+- **Measure** (Inspect tab) — click a face to see its area, click a second
+  face to see the distance between them.
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -86,10 +89,11 @@ src/dcad/
 Working: primitive creation, boolean ops, planar-face pull/push,
 fillet/chamfer, move/rotate/copy, undo/redo, interactive click-to-sketch
 drawing (Line/Rectangle/Circle) plus a dialog-based alternative, sketch
-extrude and revolve, STEP/IGES import-export, native project save/load,
-orbit/pan/zoom viewport with solid/face/edge picking. 40 kernel tests + a
-full end-to-end GUI smoke test (including real synthesized mouse clicks)
-cover all of it.
+extrude and revolve, measure (distance/length/area/volume), STEP/IGES
+import-export, native project save/load, a ribbon UI with a Structure
+tree, orbit/pan/zoom viewport with solid/face/edge picking. 46 kernel
+tests + a full end-to-end GUI smoke test (including real synthesized
+mouse clicks) cover all of it.
 
 The interactive sketcher draws real geometry as you click, but there's no
 constraint solver — no dimensional constraints (exact length/angle), no
@@ -98,7 +102,8 @@ adjust an already-placed point. That's the natural next layer if wanted:
 it's what separates "click to draw" from a true parametric sketcher.
 
 Not yet built (real SpaceClaim features, in progress): sketch constraints,
-assemblies, sheet metal, drawings, measurement tools.
+assemblies, sheet metal, drawings, ribbon icon artwork (original, not
+SpaceClaim's).
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 Siemens format — no open reader exists); a Parasolid kernel (commercial,
