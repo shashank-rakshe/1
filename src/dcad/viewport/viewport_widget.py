@@ -10,6 +10,9 @@ from dcad.viewport.occt_viewer import OcctViewer
 
 class ViewportWidget(QWidget):
     picked = Signal(object, int)  # (TopoDS_Shape, owning shape_id) or (None, -1)
+    sketch_clicked = Signal(float, float, float)
+    sketch_hover = Signal(float, float, float)
+    sketch_double_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -25,6 +28,7 @@ class ViewportWidget(QWidget):
         self._last_pos = None
         self._drag_mode = None  # None | 'rotate' | 'pan'
         self._press_pos = None
+        self.sketch_mode = False
 
     def paintEngine(self):
         return None  # Qt must not paint over the native OpenGL surface.
@@ -62,7 +66,7 @@ class ViewportWidget(QWidget):
         self._press_pos = pos
         if event.button() == Qt.MouseButton.MiddleButton or event.button() == Qt.MouseButton.RightButton:
             self._drag_mode = "pan"
-        elif event.button() == Qt.MouseButton.LeftButton:
+        elif event.button() == Qt.MouseButton.LeftButton and not self.sketch_mode:
             self._drag_mode = "rotate"
             self.viewer.view.StartRotation(pos.x(), pos.y())
 
@@ -78,6 +82,9 @@ class ViewportWidget(QWidget):
             dy = pos.y() - self._last_pos.y()
             self.viewer.view.Pan(dx, -dy)
             self.update()
+        elif self.sketch_mode:
+            x, y, z = self.viewer.screen_to_plane_point(pos.x(), pos.y())
+            self.sketch_hover.emit(x, y, z)
         else:
             self.viewer.context.MoveTo(pos.x(), pos.y(), self.viewer.view, True)
             self.update()
@@ -90,12 +97,21 @@ class ViewportWidget(QWidget):
         )
         self._drag_mode = None
         if event.button() == Qt.MouseButton.LeftButton and was_click and self._initialized:
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            if self.sketch_mode:
+                pos = event.position().toPoint()
+                x, y, z = self.viewer.screen_to_plane_point(pos.x(), pos.y())
+                self.sketch_clicked.emit(x, y, z)
+            elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 self.viewer.context.ShiftSelect(True)
+                self._emit_pick()
             else:
                 self.viewer.context.Select(True)
-            self._emit_pick()
+                self._emit_pick()
         self.update()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if self.sketch_mode and event.button() == Qt.MouseButton.LeftButton:
+            self.sketch_double_clicked.emit()
 
     def wheelEvent(self, event: QWheelEvent):
         if not self._initialized:

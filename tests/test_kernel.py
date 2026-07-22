@@ -253,3 +253,59 @@ def test_revolve_invalid_angle_raises():
     profile = sketch.revolve_profile_rectangle(1, 0, 2, 3)
     with pytest.raises(ValueError):
         sketch.revolve(profile, 400)
+
+
+def test_rectangle_points_from_corners_xy_plane():
+    pts = sketch.rectangle_points_from_corners((0, 0, 0), (2, 3, 0))
+    assert pts == [(0, 0, 0), (2, 0, 0), (2, 3, 0), (0, 3, 0)]
+
+
+def test_rectangle_points_from_corners_xz_plane():
+    pts = sketch.rectangle_points_from_corners((1, 0, 0), (2, 0, 3))
+    assert pts == [(1, 0, 0), (2, 0, 0), (2, 0, 3), (1, 0, 3)]
+
+
+def test_rectangle_points_from_corners_rejects_non_coplanar():
+    with pytest.raises(ValueError):
+        sketch.rectangle_points_from_corners((0, 0, 0), (1, 1, 1))
+
+
+def test_polygon_profile_from_clicked_points_extrude_volume():
+    pts = sketch.rectangle_points_from_corners((0, 0, 0), (2, 3, 0))
+    profile = sketch.polygon_profile(pts)
+    box = sketch.extrude(profile, 4)
+    assert math.isclose(volume_of(box), 24.0, rel_tol=1e-6)
+
+
+def test_polygon_profile_triangle_volume():
+    tri = sketch.polygon_profile([(0, 0, 0), (4, 0, 0), (0, 3, 0)])
+    solid = sketch.extrude(tri, 2)
+    assert math.isclose(volume_of(solid), 0.5 * 4 * 3 * 2, rel_tol=1e-6)
+
+
+def test_polygon_profile_requires_three_points():
+    with pytest.raises(ValueError):
+        sketch.polygon_profile([(0, 0, 0), (1, 0, 0)])
+
+
+def test_circle_profile_3d_on_revolve_plane():
+    profile = sketch.circle_profile_3d((2, 0, 1), (0, 1, 0), 0.5)
+    solid = sketch.revolve(profile, 360)
+    assert volume_of(solid) > 0
+
+
+def test_circle_profile_3d_invalid_radius_raises():
+    with pytest.raises(ValueError):
+        sketch.circle_profile_3d((0, 0, 0), (0, 0, 1), -1)
+
+
+def test_open_polyline_wire_shape_type():
+    from OCP.TopAbs import TopAbs_WIRE
+
+    wire = sketch.open_polyline_wire([(0, 0, 0), (1, 0, 0), (1, 1, 0)])
+    assert wire.ShapeType() == TopAbs_WIRE
+
+
+def test_open_polyline_wire_requires_two_points():
+    with pytest.raises(ValueError):
+        sketch.open_polyline_wire([(0, 0, 0)])

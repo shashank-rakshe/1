@@ -14,7 +14,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from PySide6.QtWidgets import QApplication, QInputDialog
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QPoint
+from PySide6.QtTest import QTest
+from PySide6.QtCore import Qt
 
 from dcad.ui.main_window import MainWindow
 
@@ -143,6 +145,92 @@ def run():
             assert len(window.document.objects) == count_before + 3
         except Exception as exc:
             errors.append(("sketch", exc))
+        QTimer.singleShot(200, step_interactive_sketch)
+
+    def step_interactive_sketch():
+        try:
+            count_before = len(window.document.objects)
+
+            # Extrude session: rectangle, then circle, then a line-drawn
+            # triangle (closed via double-click), all on the XY plane.
+            window.sketch_extrude_action.setChecked(True)
+            assert window.interactive_sketch_active
+            assert window.interactive_sketch_finish_mode == "extrude"
+
+            window._on_sketch_hover(2, 3, 0)  # live preview path, before any click
+            window._on_sketch_clicked(0, 0, 0)
+            window._on_sketch_hover(1, 1, 0)
+            window._on_sketch_clicked(2, 3, 0)
+            assert len(window.interactive_sketch_profiles) == 1
+
+            window.sketch_entity_actions["circle"].setChecked(True)
+            window._on_sketch_clicked(5, 5, 0)
+            window._on_sketch_hover(6, 5, 0)
+            window._on_sketch_clicked(6, 5, 0)
+            assert len(window.interactive_sketch_profiles) == 2
+
+            window.sketch_entity_actions["line"].setChecked(True)
+            window._on_sketch_clicked(0, 0, 0)
+            window._on_sketch_clicked(4, 0, 0)
+            window._on_sketch_hover(4, 3, 0)
+            window._on_sketch_clicked(4, 3, 0)
+            window._on_sketch_finish_entity()
+            assert len(window.interactive_sketch_profiles) == 3
+
+            with patch.object(QInputDialog, "getDouble", return_value=(2.0, True)):
+                window.finish_interactive_sketch()
+            assert not window.interactive_sketch_active, "Finish Sketch should exit sketch mode"
+            assert len(window.document.objects) == count_before + 3, "3 profiles -> 3 new solids"
+
+            # Revolve session: a ring rectangle on the XZ plane.
+            count_before = len(window.document.objects)
+            window.sketch_revolve_action.setChecked(True)
+            assert window.interactive_sketch_finish_mode == "revolve"
+            window.sketch_entity_actions["rect"].setChecked(True)
+            window._on_sketch_clicked(1, 0, 0)
+            window._on_sketch_clicked(2, 0, 3)
+            assert len(window.interactive_sketch_profiles) == 1
+
+            with patch.object(QInputDialog, "getDouble", return_value=(360.0, True)):
+                window.finish_interactive_sketch()
+            assert len(window.document.objects) == count_before + 1
+
+            # Cancel should discard without adding anything.
+            count_before = len(window.document.objects)
+            window.sketch_extrude_action.setChecked(True)
+            window._on_sketch_clicked(10, 10, 0)
+            window._on_sketch_clicked(12, 12, 0)
+            assert len(window.interactive_sketch_profiles) == 1
+            window.cancel_interactive_sketch()
+            assert not window.interactive_sketch_active
+            assert len(window.document.objects) == count_before, "Cancel Sketch must not add solids"
+        except Exception as exc:
+            errors.append(("interactive_sketch", exc))
+        QTimer.singleShot(200, step_real_mouse_sketch)
+
+    def step_real_mouse_sketch():
+        # Drives actual synthesized QMouseEvents through the widget's real
+        # event handlers (mousePressEvent/mouseMoveEvent/mouseReleaseEvent),
+        # not direct handler calls -- end-to-end proof the pixel-click ->
+        # screen_to_plane_point -> profile -> extrude pipeline works.
+        try:
+            count_before = len(window.document.objects)
+            window.sketch_extrude_action.setChecked(True)
+            window.sketch_entity_actions["rect"].setChecked(True)
+
+            vp = window.viewport
+            p1 = QPoint(vp.width() // 2 - 60, vp.height() // 2 - 40)
+            p2 = QPoint(vp.width() // 2 + 60, vp.height() // 2 + 40)
+            QTest.mouseClick(vp, Qt.MouseButton.LeftButton, pos=p1)
+            QTest.mouseMove(vp, pos=p2)
+            QTest.mouseClick(vp, Qt.MouseButton.LeftButton, pos=p2)
+            assert len(window.interactive_sketch_profiles) == 1, "two real mouse clicks should finalize one rectangle profile"
+
+            with patch.object(QInputDialog, "getDouble", return_value=(3.0, True)):
+                window.finish_interactive_sketch()
+            assert len(window.document.objects) == count_before + 1, "real-mouse-drawn sketch should extrude into a new solid"
+        except Exception as exc:
+            errors.append(("real_mouse_sketch", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

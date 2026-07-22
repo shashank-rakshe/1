@@ -16,6 +16,12 @@ from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, f
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
+from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
+
+# Sketch entities are given temporary negative ids so they never collide
+# with document objects (positive ids from an itertools.count(1)) or the
+# viewport's PREVIEW_ID (-1).
+_SKETCH_TEMP_ID_BASE = -100
 
 # tool name -> (pick mode, status hint)
 _TOOL_MODES = {
@@ -35,9 +41,20 @@ class MainWindow(QMainWindow):
         self.viewport = ViewportWidget(self)
         self.setCentralWidget(self.viewport)
         self.viewport.picked.connect(self._on_picked)
+        self.viewport.sketch_clicked.connect(self._on_sketch_clicked)
+        self.viewport.sketch_hover.connect(self._on_sketch_hover)
+        self.viewport.sketch_double_clicked.connect(self._on_sketch_finish_entity)
 
         self.active_tool = "select"
         self._tool_actions = {}
+
+        self.interactive_sketch_active = False
+        self.interactive_sketch_finish_mode = None  # "extrude" | "revolve"
+        self.interactive_sketch_tool = None  # "line" | "rect" | "circle"
+        self.interactive_sketch_points = []
+        self.interactive_sketch_profiles = []
+        self._interactive_sketch_shape_ids = []
+        self.sketch_entity_actions = {}
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar(self))
@@ -88,6 +105,33 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction(self._action("Fit All", self.viewport.fit_all))
 
+        self.addToolBarBreak()
+        sketch_tb = QToolBar("Interactive Sketch", self)
+        sketch_tb.setMovable(False)
+        self.addToolBar(sketch_tb)
+
+        self.sketch_extrude_action = QAction("Sketch (Extrude)", self)
+        self.sketch_extrude_action.setCheckable(True)
+        self.sketch_extrude_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("extrude", checked))
+        sketch_tb.addAction(self.sketch_extrude_action)
+
+        self.sketch_revolve_action = QAction("Sketch (Revolve)", self)
+        self.sketch_revolve_action.setCheckable(True)
+        self.sketch_revolve_action.toggled.connect(lambda checked: self._toggle_interactive_sketch("revolve", checked))
+        sketch_tb.addAction(self.sketch_revolve_action)
+        sketch_tb.addSeparator()
+
+        for name, label in [("line", "Line"), ("rect", "Rectangle"), ("circle", "Circle")]:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.toggled.connect(lambda checked, n=name: self._on_sketch_entity_toggled(n, checked))
+            self.sketch_entity_actions[name] = action
+            sketch_tb.addAction(action)
+        sketch_tb.addSeparator()
+
+        sketch_tb.addAction(self._action("Finish Sketch", self.finish_interactive_sketch))
+        sketch_tb.addAction(self._action("Cancel Sketch", self.cancel_interactive_sketch))
+
     def _action(self, label: str, slot) -> QAction:
         action = QAction(label, self)
         action.triggered.connect(slot)
@@ -107,6 +151,8 @@ class MainWindow(QMainWindow):
                     action.blockSignals(True)
                     action.setChecked(False)
                     action.blockSignals(False)
+            if self.interactive_sketch_active:
+                self._exit_interactive_sketch()
             self.active_tool = tool_name
             mode, hint = _TOOL_MODES[tool_name]
             self.viewport.clear_selection()
@@ -255,6 +301,170 @@ class MainWindow(QMainWindow):
             return
         self.document.snapshot()
         self._add_to_scene(solid, name="SketchRevolve")
+
+    # -- interactive (click-to-place) sketching ---------------------------
+    # Extrude sketches are drawn on the XY plane (normal +Z, matching the
+    # extrude direction); Revolve sketches are drawn on the XZ plane
+    # (normal +Y, so the profile contains the Z rotation axis -- a profile
+    # perpendicular to the axis would sweep zero volume).
+    def _current_sketch_normal(self):
+        return (0.0, 0.0, 1.0) if self.interactive_sketch_finish_mode == "extrude" else (0.0, 1.0, 0.0)
+
+    def _toggle_interactive_sketch(self, mode: str, checked: bool):
+        other = self.sketch_revolve_action if mode == "extrude" else self.sketch_extrude_action
+        if checked:
+            other.blockSignals(True)
+            other.setChecked(False)
+            other.blockSignals(False)
+            for action in self._tool_actions.values():
+                if action.isChecked():
+                    action.blockSignals(True)
+                    action.setChecked(False)
+                    action.blockSignals(False)
+            self.active_tool = "select"
+            self.viewport.viewer.set_pick_mode(MODE_SOLID)
+
+            self.interactive_sketch_active = True
+            self.interactive_sketch_finish_mode = mode
+            self.interactive_sketch_points = []
+            self.interactive_sketch_profiles = []
+            self._interactive_sketch_shape_ids = []
+            self.viewport.sketch_mode = True
+            normal = self._current_sketch_normal()
+            self.viewport.viewer.set_sketch_plane(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(*normal)))
+            self.sketch_entity_actions["rect"].setChecked(True)
+            self.statusBar().showMessage(f"Sketch ({mode}): choose Line/Rectangle/Circle, then click points in the viewport")
+        elif self.interactive_sketch_active and self.interactive_sketch_finish_mode == mode:
+            self._exit_interactive_sketch()
+
+    def _on_sketch_entity_toggled(self, name: str, checked: bool):
+        if checked:
+            for n, action in self.sketch_entity_actions.items():
+                if n != name and action.isChecked():
+                    action.blockSignals(True)
+                    action.setChecked(False)
+                    action.blockSignals(False)
+            self.interactive_sketch_tool = name
+            self.interactive_sketch_points = []
+            self.viewport.viewer.set_preview(None)
+        elif self.interactive_sketch_tool == name:
+            self.interactive_sketch_tool = None
+            self.interactive_sketch_points = []
+            self.viewport.viewer.set_preview(None)
+
+    def _on_sketch_hover(self, x: float, y: float, z: float):
+        if not self.interactive_sketch_active or not self.interactive_sketch_tool:
+            return
+        pts = self.interactive_sketch_points + [(x, y, z)]
+        preview = None
+        try:
+            if self.interactive_sketch_tool == "rect" and len(pts) == 2:
+                preview = sketch.polygon_profile(sketch.rectangle_points_from_corners(pts[0], pts[1]))
+            elif self.interactive_sketch_tool == "circle" and len(pts) == 2:
+                radius = sketch.distance(pts[0], pts[1])
+                preview = sketch.circle_profile_3d(pts[0], self._current_sketch_normal(), radius)
+            elif self.interactive_sketch_tool == "line" and len(pts) >= 2:
+                preview = sketch.open_polyline_wire(pts)
+        except Exception:
+            preview = None  # degenerate in-progress geometry (e.g. zero-size); just skip the preview
+        self.viewport.viewer.set_preview(preview)
+        self.viewport.update()
+
+    def _on_sketch_clicked(self, x: float, y: float, z: float):
+        if not self.interactive_sketch_active or not self.interactive_sketch_tool:
+            return
+        pts = self.interactive_sketch_points
+        pts.append((x, y, z))
+        tool = self.interactive_sketch_tool
+        try:
+            if tool == "rect" and len(pts) == 2:
+                self._finalize_sketch_profile(sketch.polygon_profile(sketch.rectangle_points_from_corners(pts[0], pts[1])))
+            elif tool == "circle" and len(pts) == 2:
+                radius = sketch.distance(pts[0], pts[1])
+                self._finalize_sketch_profile(sketch.circle_profile_3d(pts[0], self._current_sketch_normal(), radius))
+            elif tool == "line":
+                self.statusBar().showMessage(f"Sketch: {len(pts)} point(s) placed — double-click to close the polygon")
+        except Exception as exc:
+            QMessageBox.warning(self, "Sketch", str(exc))
+            self.interactive_sketch_points = []
+
+    def _on_sketch_finish_entity(self):
+        if not self.interactive_sketch_active or self.interactive_sketch_tool != "line":
+            return
+        pts = self.interactive_sketch_points
+        if len(pts) < 3:
+            QMessageBox.information(self, "Sketch", "A polygon needs at least 3 points.")
+            return
+        try:
+            face = sketch.polygon_profile(pts)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sketch", str(exc))
+            return
+        self._finalize_sketch_profile(face)
+
+    def _finalize_sketch_profile(self, face):
+        self.interactive_sketch_profiles.append(face)
+        temp_id = _SKETCH_TEMP_ID_BASE - len(self.interactive_sketch_profiles)
+        self._interactive_sketch_shape_ids.append(temp_id)
+        self.viewport.viewer.display_shape(temp_id, face)
+        self.viewport.viewer.set_preview(None)
+        self.interactive_sketch_points = []
+        self.viewport.update()
+        self.statusBar().showMessage(
+            f"Sketch: {len(self.interactive_sketch_profiles)} profile(s) placed — add more or Finish Sketch"
+        )
+
+    def _exit_interactive_sketch(self):
+        for temp_id in self._interactive_sketch_shape_ids:
+            self.viewport.viewer.remove_shape(temp_id)
+        self._interactive_sketch_shape_ids = []
+        self.viewport.viewer.set_preview(None)
+        self.interactive_sketch_active = False
+        self.interactive_sketch_finish_mode = None
+        self.interactive_sketch_tool = None
+        self.interactive_sketch_points = []
+        self.interactive_sketch_profiles = []
+        self.viewport.sketch_mode = False
+        self.viewport.viewer.set_pick_mode(MODE_SOLID)
+        for action in list(self.sketch_entity_actions.values()) + [self.sketch_extrude_action, self.sketch_revolve_action]:
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
+        self.viewport.update()
+        self.statusBar().showMessage("Ready")
+
+    def cancel_interactive_sketch(self):
+        if self.interactive_sketch_active:
+            self._exit_interactive_sketch()
+
+    def finish_interactive_sketch(self):
+        if not self.interactive_sketch_active:
+            return
+        if not self.interactive_sketch_profiles:
+            QMessageBox.information(self, "Finish Sketch", "Sketch at least one closed profile first (Rectangle/Circle, or Line + double-click).")
+            return
+        mode = self.interactive_sketch_finish_mode
+        if mode == "extrude":
+            height, ok = QInputDialog.getDouble(self, "Extrude", "Height:", 2.0, -1000.0, 1000.0, 3)
+            if not ok:
+                return
+            op, name = (lambda face: sketch.extrude(face, height)), "SketchExtrude"
+        else:
+            angle, ok = QInputDialog.getDouble(self, "Revolve", "Angle (degrees):", 360.0, 0.001, 360.0, 2)
+            if not ok:
+                return
+            op, name = (lambda face: sketch.revolve(face, angle)), "SketchRevolve"
+
+        profiles = list(self.interactive_sketch_profiles)
+        self.document.snapshot()
+        self._exit_interactive_sketch()
+        for face in profiles:
+            try:
+                solid = op(face)
+            except Exception as exc:
+                QMessageBox.warning(self, "Sketch finish failed", str(exc))
+                continue
+            self._add_to_scene(solid, name=name)
 
     # -- move / rotate / copy -------------------------------------------
     def _prompt_xyz(self, title: str, default=(0.0, 0.0, 0.0)):
