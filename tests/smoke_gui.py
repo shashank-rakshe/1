@@ -76,6 +76,19 @@ def all_faces_of(shape):
     return faces
 
 
+def all_edges_of(shape):
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    edges = []
+    explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    while explorer.More():
+        edges.append(TopoDS.Edge_s(explorer.Current()))
+        explorer.Next()
+    return edges
+
+
 def face_z(face):
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -568,6 +581,45 @@ def run():
             assert math.isclose(new_bottom_z, 1.0, abs_tol=1e-6), "AlignMoving's bottom face should now sit on AlignStationary's top face"
 
             window._tool_actions["align"].setChecked(False)
+            assert window.active_tool == "select"
+
+            # Assembly > Orient: click the edge to rotate, then the edge
+            # to match its direction to.
+            from OCP.BRepAdaptor import BRepAdaptor_Curve
+            from OCP.BRepGProp import BRepGProp
+            from OCP.GProp import GProp_GProps
+
+            def edge_len_dir(edge):
+                direction = BRepAdaptor_Curve(edge).Line().Direction()
+                props = GProp_GProps()
+                BRepGProp.LinearProperties_s(edge, props)
+                return props.Mass(), direction
+
+            def edge_along(shape, axis, length):
+                for e in all_edges_of(shape):
+                    edge_length, direction = edge_len_dir(e)
+                    component = {"x": direction.X(), "y": direction.Y()}[axis]
+                    if math.isclose(edge_length, length, rel_tol=1e-6) and abs(component) > 0.9:
+                        return e
+                raise AssertionError(f"no length-{length} edge along {axis}")
+
+            box_c = window._add_to_scene(primitives.make_box(2, 1, 1, gp_Pnt(10, 0, 0)), name="OrientMoving")
+            box_d = window._add_to_scene(primitives.make_box(1, 2, 1, gp_Pnt(15, 0, 0)), name="OrientTarget")
+
+            moving_edge = edge_along(box_c.shape, "x", 2.0)
+            target_edge = edge_along(box_d.shape, "y", 2.0)
+
+            window._tool_actions["orient"].setChecked(True)
+            assert window.active_tool == "orient"
+            window._on_picked(moving_edge, box_c.id)
+            assert len(window.orient_picks) == 1, "first edge pick should be buffered, not yet resolved"
+            window._on_picked(target_edge, box_d.id)
+            assert len(window.orient_picks) == 0, "second pick should resolve the orient and reset"
+
+            oriented = window.document.get(box_c.id)
+            assert edge_along(oriented.shape, "y", 2.0) is not None, "OrientMoving's length-2 edge should now point along Y"
+
+            window._tool_actions["orient"].setChecked(False)
             assert window.active_tool == "select"
 
             # Anchor guards Move/Rotate on the anchored part...

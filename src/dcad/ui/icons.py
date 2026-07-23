@@ -395,6 +395,18 @@ def _icon_align():
     return c.finish()
 
 
+def _icon_orient():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(4, 22), _pt(16, 6))
+    _arrow_head(p, _pt(16, 6), -50)
+    p.setPen(c.accent_pen(1.8))
+    p.drawArc(QRectF(6, 6, 16, 16), 20 * 16, 200 * 16)
+    tip = QPointF(14 + 8 * math.cos(math.radians(220)), 14 + 8 * math.sin(math.radians(220)))
+    _arrow_head(p, tip, 130)
+    return c.finish()
+
+
 def _icon_anchor():
     c = _Canvas()
     p = c.painter
@@ -446,6 +458,7 @@ _BUILDERS = {
     "enclosure": _icon_enclosure,
     "share_topology": _icon_share_topology,
     "align": _icon_align,
+    "orient": _icon_orient,
     "anchor": _icon_anchor,
 }
 

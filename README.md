@@ -75,12 +75,15 @@ branding, which are ANSYS's proprietary assets.
 - **Assembly tab** — **Align**: toggle the tool, click the face to move,
   then click the face to align it to. Two planar faces are brought flush
   and facing each other (like two mating surfaces in contact); two
-  cylindrical faces are made concentric (a pin seating in a hole). This is
-  SpaceClaim's Assembly > Align; its follow-up **Orient** step (fixing the
-  rotation *about* that shared axis/plane) isn't built yet. **Anchor**:
-  select one or more solids and toggle Anchor to lock their position —
-  anchored parts show "(Anchored)" in the Structure tree and refuse
-  Move/Rotate/Align until un-anchored (also in the right-click menu).
+  cylindrical faces are made concentric (a pin seating in a hole).
+  **Orient**: toggle the tool, click the (straight) edge to rotate, then
+  the edge it should point the same way as — SpaceClaim's real follow-up
+  to Align, for fixing the rotation *about* an axis/plane Align already
+  made coincident (Align alone leaves that rotation at whatever the
+  faces' default frames produce). **Anchor**: select one or more solids
+  and toggle Anchor to lock their position — anchored parts show
+  "(Anchored)" in the Structure tree and refuse Move/Rotate/Align/Orient
+  until un-anchored (also in the right-click menu).
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -134,8 +137,8 @@ plus a dialog-based alternative, sketch extrude and revolve, measure
 project save/load, a ribbon UI with original icons and a Structure tree,
 orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
 multi-select, a selection-aware right-click context menu, Delete, and
-Assembly (Align faces/axes, Anchor to lock a part in place).
-68 kernel tests + a full end-to-end GUI smoke test (including real
+Assembly (Align faces/axes, Orient edges, Anchor to lock a part in place).
+70 kernel tests + a full end-to-end GUI smoke test (including real
 synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
@@ -179,13 +182,14 @@ SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Assembly,
 Measure, Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal,
 Tools, Display, Keyshot). This project now covers Design/Sketch/Assembly/
 Measure/Repair/Prepare (Measure+Prepare shown as "Inspect"+"Prepare" here).
-Assembly currently has Align and Anchor only — real SpaceClaim's Assembly
-also has Orient (fix the rotation about an already-aligned axis/plane) and
-full assembly-constraint components (Rigid/Tangent/Gear conditions, multi-
-configuration mates); those aren't built. Not yet built at all: Detail (2D
-drawings), Sheet Metal, sketch constraints. Out of scope: Facets/Mesh/
-Workbench (ANSYS's simulation pipeline) and Keyshot (a separate third-party
-renderer) — those aren't CAD modeling.
+Assembly currently has Align, Orient, and Anchor — real SpaceClaim's
+Assembly also has full assembly-constraint components (Rigid/Tangent/Gear
+conditions, multi-configuration mates that persist and re-solve as parts
+move); those aren't built, so Align/Orient here are one-shot moves, not
+a live constraint. Not yet built at all: Detail (2D drawings), Sheet
+Metal, sketch constraints. Out of scope: Facets/Mesh/Workbench (ANSYS's
+simulation pipeline) and Keyshot (a separate third-party renderer) —
+those aren't CAD modeling.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 ANSYS format — no open reader exists); a Parasolid kernel (commercial,

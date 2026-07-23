@@ -41,6 +41,7 @@ _TOOL_MODES = {
     "measure": (MODE_FACE, "Measure: click a face for its area, or click a second face for the distance between them"),
     "fill": (MODE_FACE, "Fill: click a face to remove and heal"),
     "align": (MODE_FACE, "Align: click the face to move, then click the face to align it to"),
+    "orient": (MODE_EDGE, "Orient: click the edge to rotate, then click the edge to match its direction"),
 }
 
 
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         self._tool_actions = {}
         self.measure_picks = []
         self.align_picks = []  # [(DocObject, TopoDS_Face), ...] -- moving pick first, stationary second
+        self.orient_picks = []  # [(DocObject, TopoDS_Edge), ...] -- moving pick first, target pick second
         self._anchored_ids = set()  # SpaceClaim's Assembly > Anchor: locks a part in place
 
         self.interactive_sketch_active = False
@@ -173,6 +175,7 @@ class MainWindow(QMainWindow):
         assembly_tab = self.ribbon.add_tab("Assembly")
         align_group = assembly_tab.add_group("Align")
         align_group.add_action(self._tool_action("align", "Align", "align"))
+        align_group.add_action(self._tool_action("orient", "Orient", "orient"))
         fix_group_asm = assembly_tab.add_group("Fix")
         fix_group_asm.add_action(self._action("Anchor", self.toggle_anchor, "anchor"))
 
@@ -357,6 +360,7 @@ class MainWindow(QMainWindow):
             self.active_tool = tool_name
             self.measure_picks = []
             self.align_picks = []
+            self.orient_picks = []
             mode, hint = _TOOL_MODES[tool_name]
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(mode)
@@ -365,6 +369,7 @@ class MainWindow(QMainWindow):
             self.active_tool = "select"
             self.measure_picks = []
             self.align_picks = []
+            self.orient_picks = []
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(MODE_SOLID)
             self.statusBar().showMessage("Ready")
@@ -922,6 +927,10 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_FACE:
                 return
             self._on_align_picked(obj, shape)
+        elif self.active_tool == "orient":
+            if shape.ShapeType() != TopAbs_EDGE:
+                return
+            self._on_orient_picked(obj, shape)
 
     def _on_align_picked(self, obj, face):
         """SpaceClaim's Assembly > Align: click the face to move, then
@@ -946,6 +955,31 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
         self._sync_viewport()
         self.statusBar().showMessage(f"Aligned {moving_obj.name} to {stationary_obj.name}")
+
+    def _on_orient_picked(self, obj, edge):
+        """SpaceClaim's Assembly > Orient: the follow-up to Align that
+        fixes rotation about an already-shared axis/plane -- click the
+        edge to rotate, then the edge it should point the same way as."""
+        self.orient_picks.append((obj, edge))
+        if len(self.orient_picks) == 1:
+            self.statusBar().showMessage(
+                f"Orient: {obj.name} edge selected to rotate — click the edge to match its direction to"
+            )
+            return
+        (moving_obj, moving_edge), (target_obj, target_edge) = self.orient_picks
+        self.orient_picks = []
+        if not self._check_not_anchored(moving_obj):
+            return
+        try:
+            new_shape = assembly.orient_edges(moving_obj.shape, moving_edge, target_edge)
+        except Exception as exc:
+            QMessageBox.warning(self, "Orient failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(moving_obj, new_shape)
+        self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Oriented {moving_obj.name} to match {target_obj.name}")
 
     def _apply_fill(self, obj, face):
         try:

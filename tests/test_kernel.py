@@ -40,6 +40,25 @@ def face_count(shape) -> int:
     return len(all_faces(shape))
 
 
+def all_edges(shape):
+    edges = []
+    explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    while explorer.More():
+        edges.append(TopoDS.Edge_s(explorer.Current()))
+        explorer.Next()
+    return edges
+
+
+def edge_length_and_dir(edge):
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+
+    curve = BRepAdaptor_Curve(edge)
+    direction = curve.Line().Direction()
+    props = GProp_GProps()
+    BRepGProp.LinearProperties_s(edge, props)
+    return props.Mass(), direction
+
+
 def test_make_box_volume():
     box = primitives.make_box(2, 3, 4)
     assert math.isclose(volume_of(box), 24.0, rel_tol=1e-6)
@@ -175,6 +194,42 @@ def test_align_faces_rejects_mismatched_face_kinds():
     cylinder = primitives.make_cylinder(0.5, 1)
     with pytest.raises(ValueError):
         assembly.align_faces(box, first_face(box), cylindrical_face(cylinder))
+
+
+def _edge_along(shape, axis: str, length: float):
+    for edge in all_edges(shape):
+        edge_len, direction = edge_length_and_dir(edge)
+        if not math.isclose(edge_len, length, rel_tol=1e-6):
+            continue
+        component = {"x": direction.X(), "y": direction.Y(), "z": direction.Z()}[axis]
+        if abs(component) > 0.9:
+            return edge
+    raise AssertionError(f"no length-{length} edge along {axis} found")
+
+
+def test_orient_edges_rotates_to_match_direction():
+    from OCP.gp import gp_Pnt
+
+    box_a = primitives.make_box(2, 1, 1)  # has length-2 edges along X
+    box_b = primitives.make_box(1, 2, 1, gp_Pnt(5, 0, 0))  # has length-2 edges along Y
+
+    moving_edge = _edge_along(box_a, "x", 2.0)
+    target_edge = _edge_along(box_b, "y", 2.0)
+
+    moved = assembly.orient_edges(box_a, moving_edge, target_edge)
+    assert _edge_along(moved, "y", 2.0) is not None
+    assert math.isclose(volume_of(moved), volume_of(box_a), rel_tol=1e-6)
+
+
+def test_orient_edges_rejects_curved_edges():
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GeomAbs import GeomAbs_Line
+
+    cylinder = primitives.make_cylinder(1, 1)
+    straight = _edge_along(primitives.make_box(1, 1, 1), "x", 1.0)
+    curved = next(e for e in all_edges(cylinder) if BRepAdaptor_Curve(e).GetType() != GeomAbs_Line)
+    with pytest.raises(ValueError):
+        assembly.orient_edges(cylinder, curved, straight)
 
 
 def test_document_add_remove():

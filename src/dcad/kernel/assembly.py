@@ -1,10 +1,11 @@
 """Assembly-level operations: bringing one component's face into contact
-with another's (SpaceClaim's Assembly > Align)."""
+with another's (SpaceClaim's Assembly > Align), and rotating a component
+so a picked edge points the same way as another's (Assembly > Orient)."""
 
-from OCP.TopoDS import TopoDS_Shape, TopoDS_Face
+from OCP.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge
 from OCP.TopAbs import TopAbs_REVERSED
-from OCP.BRepAdaptor import BRepAdaptor_Surface
-from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder
+from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
+from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Line
 from OCP.BRepGProp import BRepGProp
 from OCP.GProp import GProp_GProps
 from OCP.gp import gp_Ax3, gp_Trsf, gp_Pnt, gp_Dir
@@ -62,6 +63,40 @@ def align_faces(
 
     from_frame = gp_Ax3(from_point, from_dir)
     to_frame = gp_Ax3(to_point, to_dir)
+    trsf = gp_Trsf()
+    trsf.SetDisplacement(from_frame, to_frame)
+    return BRepBuilderAPI_Transform(moving_shape, trsf, True).Shape()
+
+
+def _edge_direction(edge: TopoDS_Edge) -> gp_Dir:
+    curve = BRepAdaptor_Curve(edge)
+    if curve.GetType() != GeomAbs_Line:
+        raise ValueError("Orient requires straight edges")
+    direction = curve.Line().Direction()
+    return direction.Reversed() if edge.Orientation() == TopAbs_REVERSED else direction
+
+
+def orient_edges(
+    moving_shape: TopoDS_Shape,
+    moving_edge: TopoDS_Edge,
+    stationary_edge: TopoDS_Edge,
+) -> TopoDS_Shape:
+    """Rotate `moving_shape` in place -- about the midpoint of
+    `moving_edge` -- so that edge points the same way as `stationary_edge`.
+
+    This is SpaceClaim's Assembly > Orient: the follow-up to Align that
+    fixes the rotation *about* an already-shared axis or plane (Align
+    alone leaves that rotation at whatever the faces' default frames
+    happened to produce)."""
+    props = GProp_GProps()
+    BRepGProp.LinearProperties_s(moving_edge, props)
+    pivot = props.CentreOfMass()
+
+    from_dir = _edge_direction(moving_edge)
+    to_dir = _edge_direction(stationary_edge)
+
+    from_frame = gp_Ax3(pivot, from_dir)
+    to_frame = gp_Ax3(pivot, to_dir)
     trsf = gp_Trsf()
     trsf.SetDisplacement(from_frame, to_frame)
     return BRepBuilderAPI_Transform(moving_shape, trsf, True).Shape()
