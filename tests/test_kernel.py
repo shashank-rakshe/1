@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly
 from dcad.kernel.document import Document
 
 
@@ -123,6 +123,58 @@ def test_step_import_multi_keeps_parts_separate(tmp_path):
     expected = sorted([volume_of(box), volume_of(sphere)])
     for got, want in zip(volumes, expected):
         assert math.isclose(got, want, rel_tol=1e-4)
+
+
+def face_centroid(face):
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(face, props)
+    c = props.CentreOfMass()
+    return c.X(), c.Y(), c.Z()
+
+
+def cylindrical_face(shape):
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder
+
+    for face in all_faces(shape):
+        if BRepAdaptor_Surface(face, True).GetType() == GeomAbs_Cylinder:
+            return face
+    raise AssertionError("no cylindrical face found")
+
+
+def test_align_faces_planar_stacks_boxes():
+    from OCP.gp import gp_Pnt
+
+    box_a = primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 5))  # spans z in [5, 6]
+    box_b = primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 0))  # spans z in [0, 1]
+
+    bottom_a = min(all_faces(box_a), key=lambda f: face_centroid(f)[2])
+    top_b = max(all_faces(box_b), key=lambda f: face_centroid(f)[2])
+
+    moved = assembly.align_faces(box_a, bottom_a, top_b)
+    new_bottom_z = min(face_centroid(f)[2] for f in all_faces(moved))
+    assert math.isclose(new_bottom_z, 1.0, abs_tol=1e-6)
+    assert math.isclose(volume_of(moved), volume_of(box_a), rel_tol=1e-6)
+
+
+def test_align_faces_cylindrical_makes_concentric():
+    from OCP.gp import gp_Pnt
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+
+    pin = primitives.make_cylinder(0.5, 2, gp_Pnt(5, 5, 0))
+    hole_host = primitives.make_cylinder(1.0, 2, gp_Pnt(0, 0, 0))
+
+    moved = assembly.align_faces(pin, cylindrical_face(pin), cylindrical_face(hole_host))
+    axis_loc = BRepAdaptor_Surface(cylindrical_face(moved), True).Cylinder().Location()
+    assert math.isclose(axis_loc.X(), 0.0, abs_tol=1e-6)
+    assert math.isclose(axis_loc.Y(), 0.0, abs_tol=1e-6)
+
+
+def test_align_faces_rejects_mismatched_face_kinds():
+    box = primitives.make_box(1, 1, 1)
+    cylinder = primitives.make_cylinder(0.5, 1)
+    with pytest.raises(ValueError):
+        assembly.align_faces(box, first_face(box), cylindrical_face(cylinder))
 
 
 def test_document_add_remove():

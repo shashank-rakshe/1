@@ -27,9 +27,9 @@ python main.py
 
 ## UI
 
-A ribbon (Design/Sketch/Inspect/Repair/Prepare tabs, labeled button groups,
-a File menu) plus a Structure tree on the left listing every solid — click a
-tree item to select it in the viewport. This matches SpaceClaim's actual UI
+A ribbon (Design/Sketch/Assembly/Inspect/Repair/Prepare tabs, labeled button
+groups, a File menu) plus a Structure tree on the left listing every solid —
+click a tree item to select it in the viewport. This matches SpaceClaim's actual UI
 *paradigm* and terminology (Pull, Merge, Combine, Sketch Mode, Inspect,
 Repair, Prepare); it is not a pixel copy of SpaceClaim's artwork or
 branding, which are ANSYS's proprietary assets.
@@ -72,6 +72,15 @@ branding, which are ANSYS's proprietary assets.
   **Share Topology**: select 2+ touching solids, matches their contact-
   face/edge topology while keeping them as separate solids (unlike
   Merge/Combine, which welds them into one).
+- **Assembly tab** — **Align**: toggle the tool, click the face to move,
+  then click the face to align it to. Two planar faces are brought flush
+  and facing each other (like two mating surfaces in contact); two
+  cylindrical faces are made concentric (a pin seating in a hole). This is
+  SpaceClaim's Assembly > Align; its follow-up **Orient** step (fixing the
+  rotation *about* that shared axis/plane) isn't built yet. **Anchor**:
+  select one or more solids and toggle Anchor to lock their position —
+  anchored parts show "(Anchored)" in the Structure tree and refuse
+  Move/Rotate/Align until un-anchored (also in the right-click menu).
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -124,8 +133,9 @@ plus a dialog-based alternative, sketch extrude and revolve, measure
 (Interference/Enclosure/Share Topology), STEP/IGES import-export, native
 project save/load, a ribbon UI with original icons and a Structure tree,
 orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
-multi-select, a selection-aware right-click context menu, and Delete.
-65 kernel tests + a full end-to-end GUI smoke test (including real
+multi-select, a selection-aware right-click context menu, Delete, and
+Assembly (Align faces/axes, Anchor to lock a part in place).
+68 kernel tests + a full end-to-end GUI smoke test (including real
 synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
@@ -165,14 +175,17 @@ geometric constraints (parallel, coincident, tangent), no dragging to
 adjust an already-placed point. That's the natural next layer if wanted:
 it's what separates "click to draw" from a true parametric sketcher.
 
-SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Measure,
-Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal, Tools,
-Display, Keyshot). This project now covers Design/Sketch/Measure/Repair/
-Prepare (Measure+Prepare shown as "Inspect"+"Prepare" here). Not yet
-built: Assembly (multi-part, mates), Detail (2D drawings), Sheet Metal,
-sketch constraints. Out of scope: Facets/Mesh/Workbench (ANSYS's
-simulation pipeline) and Keyshot (a separate third-party renderer) —
-those aren't CAD modeling.
+SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Assembly,
+Measure, Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal,
+Tools, Display, Keyshot). This project now covers Design/Sketch/Assembly/
+Measure/Repair/Prepare (Measure+Prepare shown as "Inspect"+"Prepare" here).
+Assembly currently has Align and Anchor only — real SpaceClaim's Assembly
+also has Orient (fix the rotation about an already-aligned axis/plane) and
+full assembly-constraint components (Rigid/Tangent/Gear conditions, multi-
+configuration mates); those aren't built. Not yet built at all: Detail (2D
+drawings), Sheet Metal, sketch constraints. Out of scope: Facets/Mesh/
+Workbench (ANSYS's simulation pipeline) and Keyshot (a separate third-party
+renderer) — those aren't CAD modeling.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 ANSYS format — no open reader exists); a Parasolid kernel (commercial,

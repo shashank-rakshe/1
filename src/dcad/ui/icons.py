@@ -384,6 +384,30 @@ def _icon_share_topology():
     return c.finish()
 
 
+def _icon_align():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(4, 6, 8, 16))
+    p.setPen(c.accent_pen(1.8))
+    p.drawRect(QRectF(16, 6, 8, 16))
+    _arrow_head(p, _pt(14, 14), 0)
+    p.drawLine(_pt(12.5, 14), _pt(14, 14))
+    return c.finish()
+
+
+def _icon_anchor():
+    c = _Canvas()
+    p = c.painter
+    p.setBrush(_COLOR)
+    p.drawEllipse(QRectF(11, 3, 6, 6))
+    p.setBrush(Qt.GlobalColor.transparent)
+    p.drawLine(_pt(14, 9), _pt(14, 22))
+    p.drawArc(QRectF(6, 12, 16, 16), 200 * 16, 140 * 16)
+    p.drawLine(_pt(8, 15), _pt(14, 15))
+    p.drawLine(_pt(20, 15), _pt(14, 15))
+    return c.finish()
+
+
 _BUILDERS = {
     "select": _icon_select,
     "box": _icon_box,
@@ -421,6 +445,8 @@ _BUILDERS = {
     "interference": _icon_interference,
     "enclosure": _icon_enclosure,
     "share_topology": _icon_share_topology,
+    "align": _icon_align,
+    "anchor": _icon_anchor,
 }
 
 _cache = {}

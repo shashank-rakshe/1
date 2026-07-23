@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
@@ -40,6 +40,7 @@ _TOOL_MODES = {
     "chamfer": (MODE_EDGE, "Chamfer: click an edge"),
     "measure": (MODE_FACE, "Measure: click a face for its area, or click a second face for the distance between them"),
     "fill": (MODE_FACE, "Fill: click a face to remove and heal"),
+    "align": (MODE_FACE, "Align: click the face to move, then click the face to align it to"),
 }
 
 
@@ -61,6 +62,8 @@ class MainWindow(QMainWindow):
         self.active_tool = "select"
         self._tool_actions = {}
         self.measure_picks = []
+        self.align_picks = []  # [(DocObject, TopoDS_Face), ...] -- moving pick first, stationary second
+        self._anchored_ids = set()  # SpaceClaim's Assembly > Anchor: locks a part in place
 
         self.interactive_sketch_active = False
         self.interactive_sketch_finish_mode = None  # "extrude" | "revolve"
@@ -167,6 +170,12 @@ class MainWindow(QMainWindow):
         finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch, "check"))
         finish_group.add_action(self._action("Cancel Sketch", self.cancel_interactive_sketch, "cancel"))
 
+        assembly_tab = self.ribbon.add_tab("Assembly")
+        align_group = assembly_tab.add_group("Align")
+        align_group.add_action(self._tool_action("align", "Align", "align"))
+        fix_group_asm = assembly_tab.add_group("Fix")
+        fix_group_asm.add_action(self._action("Anchor", self.toggle_anchor, "anchor"))
+
         inspect_tab = self.ribbon.add_tab("Inspect")
         measure_group = inspect_tab.add_group("Measure")
         measure_group.add_action(self._tool_action("measure", "Measure", "measure"))
@@ -223,8 +232,34 @@ class MainWindow(QMainWindow):
             if obj is not None:
                 self.viewport.viewer.remove_shape(shape_id)
                 self.document.remove(obj)
+                self._anchored_ids.discard(shape_id)
         self._sync_viewport()
         self.statusBar().showMessage(f"Deleted {len(ids)} object(s)")
+
+    # -- assembly (Align, Anchor) ------------------------------------------
+    def _check_not_anchored(self, obj) -> bool:
+        """SpaceClaim's Anchor fixes a component's position -- guard the
+        direct-modeling tools that would move it (Move/Rotate/Align)."""
+        if obj.id in self._anchored_ids:
+            QMessageBox.information(
+                self, "Anchored", f"{obj.name} is anchored and can't be moved. Toggle Anchor to release it."
+            )
+            return False
+        return True
+
+    def toggle_anchor(self):
+        ids = self.viewport.selected_shape_ids()
+        if not ids:
+            QMessageBox.information(self, "Anchor", "Select one or more solids first.")
+            return
+        for shape_id in ids:
+            if shape_id in self._anchored_ids:
+                self._anchored_ids.discard(shape_id)
+            else:
+                self._anchored_ids.add(shape_id)
+        self._refresh_structure_tree()
+        names = [self.document.get(i).name for i in ids if self.document.get(i) is not None]
+        self.statusBar().showMessage(f"Toggled anchor for {', '.join(names)}")
 
     # -- right-click context menu (SpaceClaim's Select menu) --------------
     def _show_context_menu(self, global_pos):
@@ -256,6 +291,8 @@ class MainWindow(QMainWindow):
             menu.addSeparator()
 
         if ids:
+            anchor_label = "Unanchor" if all(i in self._anchored_ids for i in ids) else "Anchor"
+            menu.addAction(self._action(anchor_label, self.toggle_anchor, "anchor"))
             menu.addAction(self._action("Delete", self.delete_selected, "cancel"))
             menu.addSeparator()
 
@@ -278,7 +315,8 @@ class MainWindow(QMainWindow):
     def _refresh_structure_tree(self):
         self.structure_tree.clear()
         for obj in self.document.objects:
-            item = QTreeWidgetItem([obj.name])
+            label = f"{obj.name} (Anchored)" if obj.id in self._anchored_ids else obj.name
+            item = QTreeWidgetItem([label])
             item.setData(0, Qt.ItemDataRole.UserRole, obj.id)
             self.structure_tree.addTopLevelItem(item)
 
@@ -318,6 +356,7 @@ class MainWindow(QMainWindow):
                 self._exit_interactive_sketch()
             self.active_tool = tool_name
             self.measure_picks = []
+            self.align_picks = []
             mode, hint = _TOOL_MODES[tool_name]
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(mode)
@@ -325,6 +364,7 @@ class MainWindow(QMainWindow):
         elif self.active_tool == tool_name:
             self.active_tool = "select"
             self.measure_picks = []
+            self.align_picks = []
             self.viewport.clear_selection()
             self.viewport.viewer.set_pick_mode(MODE_SOLID)
             self.statusBar().showMessage("Ready")
@@ -769,6 +809,8 @@ class MainWindow(QMainWindow):
         obj = self._selected_single()
         if obj is None:
             return
+        if not self._check_not_anchored(obj):
+            return
         offset = self._prompt_xyz("Move")
         if offset is None:
             return
@@ -782,6 +824,8 @@ class MainWindow(QMainWindow):
     def do_rotate(self):
         obj = self._selected_single()
         if obj is None:
+            return
+        if not self._check_not_anchored(obj):
             return
         angle, ok = QInputDialog.getDouble(self, "Rotate", "Angle (degrees, about Z axis through origin):", 90.0, -3600.0, 3600.0, 2)
         if not ok:
@@ -874,6 +918,34 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_FACE:
                 return
             self._apply_fill(obj, shape)
+        elif self.active_tool == "align":
+            if shape.ShapeType() != TopAbs_FACE:
+                return
+            self._on_align_picked(obj, shape)
+
+    def _on_align_picked(self, obj, face):
+        """SpaceClaim's Assembly > Align: click the face to move, then
+        click the face it should become coincident with."""
+        self.align_picks.append((obj, face))
+        if len(self.align_picks) == 1:
+            self.statusBar().showMessage(
+                f"Align: {obj.name} face selected to move — click the face to align it to"
+            )
+            return
+        (moving_obj, moving_face), (stationary_obj, stationary_face) = self.align_picks
+        self.align_picks = []
+        if not self._check_not_anchored(moving_obj):
+            return
+        try:
+            new_shape = assembly.align_faces(moving_obj.shape, moving_face, stationary_face)
+        except Exception as exc:
+            QMessageBox.warning(self, "Align failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(moving_obj, new_shape)
+        self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Aligned {moving_obj.name} to {stationary_obj.name}")
 
     def _apply_fill(self, obj, face):
         try:

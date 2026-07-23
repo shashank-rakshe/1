@@ -63,6 +63,28 @@ def first_face_of_type(shape, planar: bool):
     raise AssertionError(f"no {'planar' if planar else 'non-planar'} face found")
 
 
+def all_faces_of(shape):
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    faces = []
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        faces.append(TopoDS.Face_s(explorer.Current()))
+        explorer.Next()
+    return faces
+
+
+def face_z(face):
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(face, props)
+    return props.CentreOfMass().Z()
+
+
 def run():
     app = QApplication(sys.argv)
     window = MainWindow()
@@ -518,6 +540,51 @@ def run():
                 assert window.document.get(shape_id) is None
         except Exception as exc:
             errors.append(("mouse_interactions", exc))
+        QTimer.singleShot(200, step_assembly)
+
+    def step_assembly():
+        # Assembly > Align: click the face to move, then the face to align
+        # it to; Assembly > Anchor: locks a part so Move/Rotate/Align on it
+        # are refused until toggled off again.
+        try:
+            from OCP.gp import gp_Pnt
+            from dcad.kernel import primitives
+
+            box_a = window._add_to_scene(primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 5)), name="AlignMoving")
+            box_b = window._add_to_scene(primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 0)), name="AlignStationary")
+
+            bottom_a = min(all_faces_of(box_a.shape), key=face_z)
+            top_b = max(all_faces_of(box_b.shape), key=face_z)
+
+            window._tool_actions["align"].setChecked(True)
+            assert window.active_tool == "align"
+            window._on_picked(bottom_a, box_a.id)
+            assert len(window.align_picks) == 1, "first face pick should be buffered, not yet resolved"
+            window._on_picked(top_b, box_b.id)
+            assert len(window.align_picks) == 0, "second pick should resolve the align and reset"
+
+            moved = window.document.get(box_a.id)
+            new_bottom_z = min(face_z(f) for f in all_faces_of(moved.shape))
+            assert math.isclose(new_bottom_z, 1.0, abs_tol=1e-6), "AlignMoving's bottom face should now sit on AlignStationary's top face"
+
+            window._tool_actions["align"].setChecked(False)
+            assert window.active_tool == "select"
+
+            # Anchor guards Move/Rotate on the anchored part...
+            select_by_ids(window, [box_b.id])
+            window.toggle_anchor()
+            assert box_b.id in window._anchored_ids
+            with patch.object(QMessageBox, "information") as mock_info:
+                window.do_move()
+                assert mock_info.called, "do_move on an anchored part should be refused with a message, not silently applied"
+            unmoved = window.document.get(box_b.id)
+            assert math.isclose(min(face_z(f) for f in all_faces_of(unmoved.shape)), 0.0, abs_tol=1e-6)
+
+            # ...but toggling it again releases it.
+            window.toggle_anchor()
+            assert box_b.id not in window._anchored_ids
+        except Exception as exc:
+            errors.append(("assembly", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():
