@@ -700,6 +700,68 @@ def run():
             assert window.active_tool == "select"
         except Exception as exc:
             errors.append(("sheet_metal", exc))
+        QTimer.singleShot(200, step_sketch_constraints)
+
+    def step_sketch_constraints():
+        # Sketch tab > Constraints: draw a wonky quadrilateral with the
+        # Line tool, apply Horizontal/Vertical/Distance to pull it into
+        # an exact rectangle, then close the sketch normally.
+        try:
+            window.sketch_extrude_action.setChecked(True)
+            window.sketch_entity_actions["line"].setChecked(True)
+            window._on_sketch_clicked(0, 0, 0)
+            window._on_sketch_clicked(6.3, 0.4, 0)
+            window._on_sketch_clicked(6.1, 4.2, 0)
+            window._on_sketch_clicked(-0.2, 3.9, 0)
+            assert len(window.interactive_sketch_points) == 4
+
+            with patch.object(QInputDialog, "getText", return_value=("0, 1", True)):
+                window._apply_sketch_constraint("horizontal")
+            with patch.object(QInputDialog, "getText", return_value=("1, 2", True)):
+                window._apply_sketch_constraint("vertical")
+            with patch.object(QInputDialog, "getText", return_value=("2, 3", True)):
+                window._apply_sketch_constraint("horizontal")
+            with patch.object(QInputDialog, "getText", return_value=("3, 0", True)):
+                window._apply_sketch_constraint("vertical")
+            with patch.object(QInputDialog, "getText", return_value=("0, 1, 6.0", True)):
+                window._apply_sketch_constraint("distance")
+            with patch.object(QInputDialog, "getText", return_value=("1, 2, 4.0", True)):
+                window._apply_sketch_constraint("distance")
+
+            p0, p1, p2, p3 = window.interactive_sketch_points
+            assert math.isclose(p1[0], 6.0, abs_tol=1e-4) and math.isclose(p1[1], 0.0, abs_tol=1e-4)
+            assert math.isclose(p2[0], 6.0, abs_tol=1e-4) and math.isclose(p2[1], 4.0, abs_tol=1e-4)
+            assert math.isclose(p3[0], 0.0, abs_tol=1e-4) and math.isclose(p3[1], 4.0, abs_tol=1e-4)
+
+            count_before = len(window.document.objects)
+            window._on_sketch_finish_entity()
+            window.finish_interactive_sketch()
+            assert len(window.document.objects) == count_before + 1
+
+            # Close Sketch produces a flat Surface (not a solid) -- confirm
+            # the constrained profile has exactly the intended 6x4 area,
+            # then Pull it into a solid to confirm the whole pipeline
+            # (constrain -> close -> pull) ends up with the exact volume.
+            from OCP.TopAbs import TopAbs_FACE
+            from OCP.BRepGProp import BRepGProp
+            from OCP.GProp import GProp_GProps
+
+            surface = window.document.objects[-1]
+            assert surface.shape.ShapeType() == TopAbs_FACE
+            area_props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(surface.shape, area_props)
+            assert math.isclose(area_props.Mass(), 6.0 * 4.0, rel_tol=1e-4), "constrained sketch should close to an exact 6x4 Surface"
+
+            select_by_ids(window, [surface.id])
+            window._tool_actions["pull"].setChecked(True)
+            with patch.object(QInputDialog, "getDouble", return_value=(1.0, True)):
+                window._apply_pull(surface, surface.shape)
+            window._tool_actions["pull"].setChecked(False)
+
+            thickened = window.document.get(surface.id)
+            assert math.isclose(volume_of(thickened.shape), 6.0 * 4.0 * 1.0, rel_tol=1e-4), "constrained sketch should pull to an exact 6x4x1 box"
+        except Exception as exc:
+            errors.append(("sketch_constraints", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
 from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail, sheet_metal
+from dcad.kernel.sketch_constraints import Sketch2D
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
@@ -73,6 +74,8 @@ class MainWindow(QMainWindow):
         self.interactive_sketch_finish_mode = None  # "extrude" | "revolve"
         self.interactive_sketch_tool = None  # "line" | "rect" | "circle"
         self.interactive_sketch_points = []
+        self.interactive_sketch_constraints = []  # accumulated across _apply_sketch_constraint calls
+        self._sketch_original_points = []  # unadjusted click positions the constraints solve from
         self.interactive_sketch_profiles = []
         self._interactive_sketch_shape_ids = []
         self.sketch_entity_actions = {}
@@ -169,6 +172,17 @@ class MainWindow(QMainWindow):
             action.toggled.connect(lambda checked, n=name: self._on_sketch_entity_toggled(n, checked))
             self.sketch_entity_actions[name] = action
             draw_group.add_action(action)
+
+        constraints_group = sketch_tab.add_group("Constraints")
+        for kind, label, icon in [
+            ("horizontal", "Horizontal", "constraint_horizontal"),
+            ("vertical", "Vertical", "constraint_vertical"),
+            ("distance", "Distance", "constraint_distance"),
+            ("parallel", "Parallel", "constraint_parallel"),
+            ("perpendicular", "Perpendicular", "constraint_perpendicular"),
+            ("equal_length", "Equal\nLength", "constraint_equal"),
+        ]:
+            constraints_group.add_action(self._action(label, lambda k=kind: self._apply_sketch_constraint(k), icon))
 
         finish_group = sketch_tab.add_group("Sketch")
         finish_group.add_action(self._action("Close Sketch", self.finish_interactive_sketch, "check"))
@@ -682,6 +696,7 @@ class MainWindow(QMainWindow):
             self.interactive_sketch_active = True
             self.interactive_sketch_finish_mode = mode
             self.interactive_sketch_points = []
+            self.interactive_sketch_constraints = []
             self.interactive_sketch_profiles = []
             self._interactive_sketch_shape_ids = []
             self.viewport.sketch_mode = True
@@ -702,10 +717,12 @@ class MainWindow(QMainWindow):
                     action.blockSignals(False)
             self.interactive_sketch_tool = name
             self.interactive_sketch_points = []
+            self.interactive_sketch_constraints = []
             self.viewport.viewer.set_preview(None)
         elif self.interactive_sketch_tool == name:
             self.interactive_sketch_tool = None
             self.interactive_sketch_points = []
+            self.interactive_sketch_constraints = []
             self.viewport.viewer.set_preview(None)
 
     # tool name -> number of points needed before it self-finalizes (None = line/open-ended, closed via double-click)
@@ -747,6 +764,7 @@ class MainWindow(QMainWindow):
             return
         pts = self.interactive_sketch_points
         pts.append((x, y, z))
+        self._sketch_original_points = list(pts)  # unadjusted click positions, for constraint re-solves
         tool = self.interactive_sketch_tool
         needed = self._SKETCH_TOOL_POINT_COUNTS.get(tool)
 
@@ -761,6 +779,7 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 QMessageBox.warning(self, "Sketch", str(exc))
                 self.interactive_sketch_points = []
+                self.interactive_sketch_constraints = []
         elif tool == "line":
             self.statusBar().showMessage(f"Sketch: {len(pts)} point(s) placed — double-click to close the polygon")
 
@@ -785,10 +804,102 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.display_shape(temp_id, face)
         self.viewport.viewer.set_preview(None)
         self.interactive_sketch_points = []
+        self.interactive_sketch_constraints = []
         self._sync_viewport()
         self.statusBar().showMessage(
             f"Sketch: {len(self.interactive_sketch_profiles)} profile(s) placed — add more or Finish Sketch"
         )
+
+    # -- sketch constraints (Horizontal/Vertical/Distance/Parallel/
+    # Perpendicular/Equal Length) -- turns "click to draw" into a real
+    # parametric sketch: applying a constraint re-solves every other
+    # point in the in-progress Line entity to keep it satisfied. Points
+    # are picked by index (shown in the status bar) rather than by a
+    # second round of viewport clicks -- there's no existing mechanism to
+    # click an *already-placed* sketch point, only to place a new one.
+    def _sketch_points_to_2d(self, points_3d):
+        normal = self._current_sketch_normal()
+        drop_axis = normal.index(max(normal, key=abs))
+        keep_axes = [i for i in range(3) if i != drop_axis]
+        constant = points_3d[0][drop_axis] if points_3d else 0.0
+        return [(p[keep_axes[0]], p[keep_axes[1]]) for p in points_3d], drop_axis, constant
+
+    def _sketch_points_from_2d(self, points_2d, drop_axis, constant):
+        keep_axes = [i for i in range(3) if i != drop_axis]
+        result = []
+        for u, v in points_2d:
+            point = [0.0, 0.0, 0.0]
+            point[keep_axes[0]] = u
+            point[keep_axes[1]] = v
+            point[drop_axis] = constant
+            result.append(tuple(point))
+        return result
+
+    def _apply_sketch_constraint(self, kind: str):
+        if not self.interactive_sketch_active or self.interactive_sketch_tool != "line":
+            QMessageBox.information(self, "Constrain", "Draw a Line sketch entity first (constraints apply to its in-progress points).")
+            return
+        points = self.interactive_sketch_points
+        if len(points) < 2:
+            QMessageBox.information(self, "Constrain", "Place at least two points first.")
+            return
+
+        two_segment = kind in ("parallel", "perpendicular", "equal_length", "angle")
+        prompt_label = "Segment 1 start,end, Segment 2 start,end (point indices):" if two_segment else "Point indices i, j:"
+        default = "0, 1, 2, 3" if two_segment else "0, 1"
+        needs_value = kind in ("distance", "angle")
+        if needs_value:
+            prompt_label += " plus " + ("distance" if kind == "distance" else "angle (deg)")
+            default += ", " + ("5" if kind == "distance" else "90")
+
+        text, ok = QInputDialog.getText(self, "Constrain", prompt_label, text=default)
+        if not ok:
+            return
+        try:
+            parts = [float(v.strip()) for v in text.split(",")]
+            indices = [int(v) for v in parts[: 4 if two_segment else 2]]
+            if any(i < 0 or i >= len(points) for i in indices):
+                raise ValueError("point index out of range")
+            value = parts[4 if two_segment else 2] if needs_value else None
+        except (ValueError, IndexError):
+            QMessageBox.warning(self, "Constrain", "Enter valid comma-separated indices" + (" and a value" if needs_value else "") + ".")
+            return
+
+        # Accumulate: a fresh Sketch2D built from just this one constraint
+        # would forget every constraint applied in an earlier call, so
+        # each solve replays the full history against the *original*
+        # clicked points, not the already-adjusted ones (adjusted points
+        # plus old constraints re-solved from there would work too, but
+        # re-solving from the original points is more robust against
+        # drift from many small numerical solves compounding).
+        self.interactive_sketch_constraints.append((kind, tuple(indices), value))
+
+        points_2d, drop_axis, constant = self._sketch_points_to_2d(self._sketch_original_points)
+        sk = Sketch2D(points_2d)
+        sk.fix(0)  # anchor the first point so the sketch can't drift/rotate freely
+        adders = {
+            "horizontal": sk.add_horizontal,
+            "vertical": sk.add_vertical,
+            "coincident": sk.add_coincident,
+            "distance": sk.add_distance,
+            "parallel": sk.add_parallel,
+            "perpendicular": sk.add_perpendicular,
+            "equal_length": sk.add_equal_length,
+            "angle": sk.add_angle,
+        }
+        for c_kind, c_indices, c_value in self.interactive_sketch_constraints:
+            if c_value is None:
+                adders[c_kind](*c_indices)
+            else:
+                adders[c_kind](*c_indices, c_value)
+
+        converged = sk.solve()
+        self.interactive_sketch_points = self._sketch_points_from_2d(sk.points, drop_axis, constant)
+        preview = self._build_sketch_preview("line", self.interactive_sketch_points)
+        self.viewport.viewer.set_preview(preview)
+        self._sync_viewport()
+        status = "solved" if converged else "solved approximately (over-constrained?)"
+        self.statusBar().showMessage(f"Constrain ({kind}): {status}")
 
     def _exit_interactive_sketch(self):
         for temp_id in self._interactive_sketch_shape_ids:
@@ -799,6 +910,7 @@ class MainWindow(QMainWindow):
         self.interactive_sketch_finish_mode = None
         self.interactive_sketch_tool = None
         self.interactive_sketch_points = []
+        self.interactive_sketch_constraints = []
         self.interactive_sketch_profiles = []
         self.viewport.sketch_mode = False
         self.viewport.viewer.set_pick_mode(MODE_SOLID)

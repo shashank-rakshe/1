@@ -59,6 +59,19 @@ SpaceClaim's artwork or branding, which are ANSYS's proprietary assets.
   (Sketch Rect+Extrude / Sketch Circle+Extrude / Sketch Revolve) that
   skips the Surface stage and goes straight to a solid, for typing exact
   coordinates instead of clicking.
+- **Sketch Constraints** (with the Line tool) — Horizontal / Vertical /
+  Distance / Parallel / Perpendicular / Equal Length. Place a few points,
+  then apply a constraint by typing the point indices shown in the status
+  bar (e.g. `0, 1` for Horizontal, `0, 1, 6.0` for Distance) — a small
+  least-squares solver (`kernel/sketch_constraints.Sketch2D`) re-solves
+  every non-fixed point so *all* constraints applied so far stay
+  satisfied, not just the newest one. This is a real solver, not a demo:
+  four wonky clicked points plus Horizontal/Vertical on each side and two
+  Distance constraints will converge to an exact rectangle. Picking
+  constrained points by typed index rather than by clicking them again in
+  the viewport is a deliberate simplification — there's no existing
+  mechanism to click an *already-placed* sketch point (only to place a
+  new one).
 - **Measure** (Inspect tab) — click a face to see its area, click a second
   face to see the distance between them.
 - **Repair tab** — **Stitch**: select 2+ disjoint faces/surfaces, sews them
@@ -148,17 +161,19 @@ src/dcad/
 Working: primitive creation, boolean ops, planar-face pull/push,
 fillet/chamfer, move/rotate/copy, undo/redo, interactive click-to-sketch
 drawing (Line/Rectangle/Circle/Polygon/Ellipse/3-Point Circle/3-Point Arc)
-plus a dialog-based alternative, sketch extrude and revolve, measure
-(distance/length/area/volume), Repair (Stitch/Fill/Merge Faces), Prepare
-(Interference/Enclosure/Share Topology), STEP/IGES import-export, native
-project save/load, a ribbon UI with original icons and a Structure tree,
-orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
-multi-select, a selection-aware right-click context menu, Delete,
-Assembly (Align faces/axes, Orient edges, Anchor to lock a part in
-place), Detail (Front/Top/Right/Isometric hidden-line-removed 2D
-drawing views), and Sheet Metal (Flange, plus standalone bend-allowance/
-flat-length math). 87 kernel tests + a full end-to-end GUI smoke test
-(including real synthesized mouse clicks) cover all of it.
+plus a dialog-based alternative, a real sketch constraint solver
+(Horizontal/Vertical/Distance/Parallel/Perpendicular/Equal Length),
+sketch extrude and revolve, measure (distance/length/area/volume),
+Repair (Stitch/Fill/Merge Faces), Prepare (Interference/Enclosure/Share
+Topology), STEP/IGES import-export, native project save/load, a ribbon
+UI with original icons and a Structure tree, orbit/pan/zoom viewport
+with solid/face/edge picking, Ctrl/Shift+click multi-select, a
+selection-aware right-click context menu, Delete, Assembly (Align
+faces/axes, Orient edges, Anchor to lock a part in place), Detail
+(Front/Top/Right/Isometric hidden-line-removed 2D drawing views), and
+Sheet Metal (Flange, plus standalone bend-allowance/flat-length math).
+97 kernel tests + a full end-to-end GUI smoke test (including real
+synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
 
@@ -191,11 +206,16 @@ repeated parts, level-of-detail for distant geometry, and incremental/
 streaming import for files too large to hold fully in memory — the next
 layer if a real-world file turns out to need it.
 
-The interactive sketcher draws real geometry as you click, but there's no
-constraint solver — no dimensional constraints (exact length/angle), no
-geometric constraints (parallel, coincident, tangent), no dragging to
-adjust an already-placed point. That's the natural next layer if wanted:
-it's what separates "click to draw" from a true parametric sketcher.
+The interactive sketcher draws real geometry as you click, and now has a
+real constraint solver (`kernel/sketch_constraints.py`, a small Gauss-
+Newton least-squares solver) for Horizontal/Vertical/Distance/Parallel/
+Perpendicular/Equal Length — the piece that separates "click to draw"
+from a true parametric sketcher. What it doesn't have yet: Coincident/
+Angle constraints wired into the UI (the solver supports them; only the
+ribbon buttons for the other six were built), and dragging an
+already-placed point live (constraints apply via a typed point-index
+dialog instead, since there's no mechanism to click an existing sketch
+point rather than place a new one).
 
 SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Assembly,
 Measure, Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal,

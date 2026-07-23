@@ -471,6 +471,68 @@ def _icon_flange():
     return c.finish()
 
 
+def _icon_constraint_horizontal():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(4, 14), _pt(24, 14))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(4, 10), _pt(4, 18))
+    p.drawLine(_pt(24, 10), _pt(24, 18))
+    return c.finish()
+
+
+def _icon_constraint_vertical():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(14, 4), _pt(14, 24))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(10, 4), _pt(18, 4))
+    p.drawLine(_pt(10, 24), _pt(18, 24))
+    return c.finish()
+
+
+def _icon_constraint_distance():
+    c = _Canvas()
+    p = c.painter
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(5, 8), _pt(5, 20))
+    p.drawLine(_pt(23, 8), _pt(23, 20))
+    p.setPen(QPen(_COLOR, 1.8))
+    p.drawLine(_pt(5, 14), _pt(23, 14))
+    _arrow_head(p, _pt(5, 14), 180)
+    _arrow_head(p, _pt(23, 14), 0)
+    return c.finish()
+
+
+def _icon_constraint_parallel():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(5, 8), _pt(23, 12))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(5, 18), _pt(23, 22))
+    return c.finish()
+
+
+def _icon_constraint_perpendicular():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(5, 22), _pt(5, 6))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(5, 6), _pt(23, 6))
+    return c.finish()
+
+
+def _icon_constraint_equal():
+    c = _Canvas()
+    p = c.painter
+    p.drawLine(_pt(4, 9), _pt(12, 9))
+    p.drawLine(_pt(4, 13), _pt(12, 13))
+    p.setPen(c.accent_pen(1.6))
+    p.drawLine(_pt(16, 15), _pt(24, 15))
+    p.drawLine(_pt(16, 19), _pt(24, 19))
+    return c.finish()
+
+
 _BUILDERS = {
     "select": _icon_select,
     "box": _icon_box,
@@ -516,6 +578,12 @@ _BUILDERS = {
     "view_right": _icon_view_right,
     "view_iso": _icon_view_iso,
     "flange": _icon_flange,
+    "constraint_horizontal": _icon_constraint_horizontal,
+    "constraint_vertical": _icon_constraint_vertical,
+    "constraint_distance": _icon_constraint_distance,
+    "constraint_parallel": _icon_constraint_parallel,
+    "constraint_perpendicular": _icon_constraint_perpendicular,
+    "constraint_equal": _icon_constraint_equal,
 }
 
 _cache = {}

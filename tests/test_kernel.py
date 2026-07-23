@@ -8,6 +8,7 @@ from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
 from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail, sheet_metal
+from dcad.kernel.sketch_constraints import Sketch2D
 from dcad.kernel.document import Document
 
 
@@ -435,6 +436,125 @@ def test_infer_and_make_flange_end_to_end():
     BRepBndLib.Add_s(full, box)
     xmax = box.Get()[3]
     assert xmax > 4.0  # the flange extends past the sheet's original edge
+
+
+def test_constraint_distance_moves_free_point():
+    sk = Sketch2D([(0, 0), (3, 0)])
+    sk.fix(0)
+    sk.add_distance(0, 1, 5.0)
+    assert sk.solve()
+    dist = math.hypot(sk.points[1][0] - sk.points[0][0], sk.points[1][1] - sk.points[0][1])
+    assert math.isclose(dist, 5.0, rel_tol=1e-6)
+
+
+def test_constraint_horizontal_equalizes_y():
+    sk = Sketch2D([(0, 0), (4, 3)])
+    sk.fix(0)
+    sk.add_horizontal(0, 1)
+    assert sk.solve()
+    assert math.isclose(sk.points[0][1], sk.points[1][1], abs_tol=1e-6)
+
+
+def test_constraint_vertical_equalizes_x():
+    sk = Sketch2D([(0, 0), (4, 3)])
+    sk.fix(0)
+    sk.add_vertical(0, 1)
+    assert sk.solve()
+    assert math.isclose(sk.points[0][0], sk.points[1][0], abs_tol=1e-6)
+
+
+def test_constraint_coincident_merges_points():
+    sk = Sketch2D([(0, 0), (5, 5)])
+    sk.fix(0)
+    sk.add_coincident(0, 1)
+    assert sk.solve()
+    assert math.isclose(sk.points[0][0], sk.points[1][0], abs_tol=1e-6)
+    assert math.isclose(sk.points[0][1], sk.points[1][1], abs_tol=1e-6)
+
+
+def test_constraint_parallel_aligns_segments():
+    # Segment (0,1) fixed along a diagonal; segment (2,3) starts
+    # perpendicular-ish and should rotate to become parallel to it.
+    sk = Sketch2D([(0, 0), (4, 2), (0, 5), (3, 5.5)])
+    sk.fix(0)
+    sk.fix(1)
+    sk.fix(2)
+    sk.add_parallel(0, 1, 2, 3)
+    assert sk.solve()
+    d1 = (sk.points[1][0] - sk.points[0][0], sk.points[1][1] - sk.points[0][1])
+    d2 = (sk.points[3][0] - sk.points[2][0], sk.points[3][1] - sk.points[2][1])
+    cross = d1[0] * d2[1] - d1[1] * d2[0]
+    assert math.isclose(cross, 0.0, abs_tol=1e-6)
+
+
+def test_constraint_perpendicular_rotates_segment():
+    sk = Sketch2D([(0, 0), (4, 0), (0, 5), (3, 5.5)])
+    sk.fix(0)
+    sk.fix(1)
+    sk.fix(2)
+    sk.add_perpendicular(0, 1, 2, 3)
+    assert sk.solve()
+    d1 = (sk.points[1][0] - sk.points[0][0], sk.points[1][1] - sk.points[0][1])
+    d2 = (sk.points[3][0] - sk.points[2][0], sk.points[3][1] - sk.points[2][1])
+    dot = d1[0] * d2[0] + d1[1] * d2[1]
+    assert math.isclose(dot, 0.0, abs_tol=1e-6)
+
+
+def test_constraint_equal_length_matches_segments():
+    sk = Sketch2D([(0, 0), (5, 0), (0, 5), (3, 5)])
+    sk.fix(0)
+    sk.fix(1)
+    sk.fix(2)
+    sk.add_equal_length(0, 1, 2, 3)
+    assert sk.solve()
+    len1 = math.hypot(sk.points[1][0] - sk.points[0][0], sk.points[1][1] - sk.points[0][1])
+    len2 = math.hypot(sk.points[3][0] - sk.points[2][0], sk.points[3][1] - sk.points[2][1])
+    assert math.isclose(len1, len2, rel_tol=1e-6)
+
+
+def test_constraint_angle_matches_target():
+    sk = Sketch2D([(0, 0), (4, 0), (0, 5), (3, 5.5)])
+    sk.fix(0)
+    sk.fix(1)
+    sk.fix(2)
+    sk.add_angle(0, 1, 2, 3, 90.0)
+    assert sk.solve()
+    d1 = (sk.points[1][0] - sk.points[0][0], sk.points[1][1] - sk.points[0][1])
+    d2 = (sk.points[3][0] - sk.points[2][0], sk.points[3][1] - sk.points[2][1])
+    cross = d1[0] * d2[1] - d1[1] * d2[0]
+    dot = d1[0] * d2[0] + d1[1] * d2[1]
+    angle = math.degrees(math.atan2(cross, dot))
+    assert math.isclose(angle, 90.0, abs_tol=1e-4)
+
+
+def test_constraint_rectangle_fully_solves_to_exact_dimensions():
+    # Four corners of a sketchy, not-quite-rectangular quadrilateral;
+    # horizontal/vertical on each side plus two distance constraints
+    # should pull it into an exact 6x4 rectangle anchored at the origin.
+    sk = Sketch2D([(0, 0), (6.3, 0.4), (6.1, 4.2), (-0.2, 3.9)])
+    sk.fix(0)
+    sk.add_horizontal(0, 1)
+    sk.add_vertical(1, 2)
+    sk.add_horizontal(2, 3)
+    sk.add_vertical(3, 0)
+    sk.add_distance(0, 1, 6.0)
+    sk.add_distance(1, 2, 4.0)
+    assert sk.solve()
+    p0, p1, p2, p3 = sk.points
+    assert math.isclose(p0[0], 0.0, abs_tol=1e-5) and math.isclose(p0[1], 0.0, abs_tol=1e-5)
+    assert math.isclose(p1[0], 6.0, abs_tol=1e-5) and math.isclose(p1[1], 0.0, abs_tol=1e-5)
+    assert math.isclose(p2[0], 6.0, abs_tol=1e-5) and math.isclose(p2[1], 4.0, abs_tol=1e-5)
+    assert math.isclose(p3[0], 0.0, abs_tol=1e-5) and math.isclose(p3[1], 4.0, abs_tol=1e-5)
+
+
+def test_constraint_solve_reports_false_when_contradictory():
+    # Both points fixed 1 apart, but asked to be 5 apart -- nothing is
+    # free to move, so the residual can't be driven to zero.
+    sk = Sketch2D([(0, 0), (1, 0)])
+    sk.fix(0)
+    sk.fix(1)
+    sk.add_distance(0, 1, 5.0)
+    assert sk.solve() is False
 
 
 def test_document_add_remove():
