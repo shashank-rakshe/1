@@ -662,6 +662,44 @@ def run():
             empty_window.close()
         except Exception as exc:
             errors.append(("detail", exc))
+        QTimer.singleShot(200, step_sheet_metal)
+
+    def step_sheet_metal():
+        # Sheet Metal > Flange: click an edge on a thin sheet, base face
+        # and outward direction are inferred, then thickness/wall length/
+        # angle/bend radius come from a dialog (mocked like Move/Rotate).
+        try:
+            from dcad.kernel import primitives
+
+            thickness = 0.2
+            sheet_obj = window._add_to_scene(primitives.make_box(4, 4, thickness), name="Sheet")
+            volume_before = volume_of(sheet_obj.shape)
+
+            edge = None
+            for e in all_edges_of(sheet_obj.shape):
+                from OCP.BRepGProp import BRepGProp
+                from OCP.GProp import GProp_GProps
+
+                props = GProp_GProps()
+                BRepGProp.LinearProperties_s(e, props)
+                c = props.CentreOfMass()
+                if math.isclose(c.X(), 4.0, abs_tol=1e-6) and math.isclose(c.Z(), thickness, abs_tol=1e-6):
+                    edge = e
+                    break
+            assert edge is not None
+
+            window._tool_actions["flange"].setChecked(True)
+            assert window.active_tool == "flange"
+            with patch.object(QInputDialog, "getText", return_value=("0.2, 1.0, 90, 0.3", True)):
+                window._on_picked(edge, sheet_obj.id)
+
+            flanged = window.document.get(sheet_obj.id)
+            assert volume_of(flanged.shape) > volume_before, "Flange should add material to the sheet"
+
+            window._tool_actions["flange"].setChecked(False)
+            assert window.active_tool == "select"
+        except Exception as exc:
+            errors.append(("sheet_metal", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail, sheet_metal
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
@@ -43,6 +43,7 @@ _TOOL_MODES = {
     "fill": (MODE_FACE, "Fill: click a face to remove and heal"),
     "align": (MODE_FACE, "Align: click the face to move, then click the face to align it to"),
     "orient": (MODE_EDGE, "Orient: click the edge to rotate, then click the edge to match its direction"),
+    "flange": (MODE_EDGE, "Flange: click an edge on a thin sheet to bend a new wall from it"),
 }
 
 
@@ -204,6 +205,10 @@ class MainWindow(QMainWindow):
         prepare_group.add_action(self._action("Interference", self.do_check_interference, "interference"))
         prepare_group.add_action(self._action("Enclosure", self.do_enclosure, "enclosure"))
         prepare_group.add_action(self._action("Share\nTopology", self.do_share_topology, "share_topology"))
+
+        sheet_metal_tab = self.ribbon.add_tab("Sheet Metal")
+        sheet_metal_create_group = sheet_metal_tab.add_group("Create")
+        sheet_metal_create_group.add_action(self._tool_action("flange", "Flange", "flange"))
 
         self.ribbon.set_current_tab(0)
 
@@ -961,6 +966,43 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_EDGE:
                 return
             self._on_orient_picked(obj, shape)
+        elif self.active_tool == "flange":
+            if shape.ShapeType() != TopAbs_EDGE:
+                return
+            self._apply_flange(obj, shape)
+
+    def _apply_flange(self, obj, edge):
+        """SpaceClaim's Sheet Metal > Flange: click an edge on a thin
+        sheet to bend a new wall from it. The base face and outward
+        direction are inferred from geometry (the largest planar face
+        touching the edge, and the in-plane direction away from that
+        face's centroid) rather than asked for -- SpaceClaim's real tool
+        gets those from where you drag."""
+        if not self._check_not_anchored(obj):
+            return
+        try:
+            base_face = sheet_metal.infer_base_face(obj.shape, edge)
+            outward_dir = sheet_metal.infer_outward_direction(base_face, edge)
+        except Exception as exc:
+            QMessageBox.warning(self, "Flange failed", str(exc))
+            return
+        values = self._prompt_floats(
+            "Flange", "Thickness, Wall Length, Angle (deg), Bend Radius:", (0.2, 1.0, 90.0, 0.2)
+        )
+        if values is None:
+            return
+        thickness, wall_length, angle_deg, bend_radius = values
+        try:
+            flange = sheet_metal.make_flange(base_face, edge, outward_dir, thickness, wall_length, angle_deg, bend_radius)
+            new_shape = booleans.union(obj.shape, flange)
+        except Exception as exc:
+            QMessageBox.warning(self, "Flange failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(obj, new_shape)
+        self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Added a flange to {obj.name}")
 
     def _on_align_picked(self, obj, face):
         """SpaceClaim's Assembly > Align: click the face to move, then

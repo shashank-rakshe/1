@@ -27,11 +27,11 @@ python main.py
 
 ## UI
 
-A ribbon (Design/Sketch/Assembly/Detail/Inspect/Repair/Prepare tabs, labeled
-button groups, a File menu) plus a Structure tree on the left listing every
-solid — click a tree item to select it in the viewport. This matches
-SpaceClaim's actual UI *paradigm* and terminology (Pull, Merge, Combine,
-Sketch Mode, Inspect, Repair, Prepare); it is not a pixel copy of
+A ribbon (Design/Sketch/Assembly/Detail/Inspect/Repair/Prepare/Sheet Metal
+tabs, labeled button groups, a File menu) plus a Structure tree on the left
+listing every solid — click a tree item to select it in the viewport. This
+matches SpaceClaim's actual UI *paradigm* and terminology (Pull, Merge,
+Combine, Sketch Mode, Inspect, Repair, Prepare); it is not a pixel copy of
 SpaceClaim's artwork or branding, which are ANSYS's proprietary assets.
 
 ## Using the app
@@ -90,6 +90,17 @@ SpaceClaim's artwork or branding, which are ANSYS's proprietary assets.
   HLRBRep algorithm. This is SpaceClaim's Detail tab simplified to one
   view per window rather than multiple views laid out on a shared
   drawing sheet with a title block; there's no dimensioning yet either.
+- **Sheet Metal tab** — **Flange**: toggle the tool, click an edge on a
+  thin sheet to bend a new wall from it. The base face and the in-plane
+  direction the flange extends are inferred from geometry (the largest
+  planar face touching the edge, and the direction away from that
+  face's centroid); a dialog then asks for thickness, wall length, bend
+  angle, and bend radius. `kernel/sheet_metal.bend_allowance()` /
+  `flat_length()` implement the standard K-factor bend-allowance formula
+  (the flat-pattern length a bend adds) matching SpaceClaim's own Bend
+  Allowances math. **Unfold/Fold/Flatten** (walking a part's whole
+  face-adjacency graph to classify and unroll every bend) is a
+  materially bigger, separate algorithm and isn't built.
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -144,8 +155,9 @@ project save/load, a ribbon UI with original icons and a Structure tree,
 orbit/pan/zoom viewport with solid/face/edge picking, Ctrl/Shift+click
 multi-select, a selection-aware right-click context menu, Delete,
 Assembly (Align faces/axes, Orient edges, Anchor to lock a part in
-place), and Detail (Front/Top/Right/Isometric hidden-line-removed 2D
-drawing views). 77 kernel tests + a full end-to-end GUI smoke test
+place), Detail (Front/Top/Right/Isometric hidden-line-removed 2D
+drawing views), and Sheet Metal (Flange, plus standalone bend-allowance/
+flat-length math). 87 kernel tests + a full end-to-end GUI smoke test
 (including real synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
@@ -188,17 +200,19 @@ it's what separates "click to draw" from a true parametric sketcher.
 SpaceClaim's actual ribbon has 13 tabs total (Design, Sketch, Assembly,
 Measure, Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal,
 Tools, Display, Keyshot). This project now covers Design/Sketch/Assembly/
-Measure/Repair/Prepare/Detail (Measure+Prepare shown as "Inspect"+"Prepare"
-here). Assembly currently has Align, Orient, and Anchor — real
-SpaceClaim's Assembly also has full assembly-constraint components
-(Rigid/Tangent/Gear conditions, multi-configuration mates that persist
-and re-solve as parts move); those aren't built, so Align/Orient here
-are one-shot moves, not a live constraint. Detail currently opens one
-hidden-line view per window with no sheet layout, title block, or
+Measure/Repair/Prepare/Detail/Sheet Metal (Measure+Prepare shown as
+"Inspect"+"Prepare" here) — 8 of 13. Assembly currently has Align, Orient,
+and Anchor — real SpaceClaim's Assembly also has full assembly-constraint
+components (Rigid/Tangent/Gear conditions, multi-configuration mates that
+persist and re-solve as parts move); those aren't built, so Align/Orient
+here are one-shot moves, not a live constraint. Detail currently opens
+one hidden-line view per window with no sheet layout, title block, or
 dimensioning — real SpaceClaim places multiple views on a shared
 drawing sheet and lets you add dimension/annotation callouts; that
-sheet-layout layer isn't built. Not yet built at all: Sheet Metal,
-sketch constraints. Out of scope: Facets/Mesh/Workbench (ANSYS's
+sheet-layout layer isn't built. Sheet Metal currently has Flange plus the bend-allowance/flat-length
+math only — Unfold/Fold/Flatten (walking a part's whole face-adjacency
+graph to classify and unroll every bend) is a materially bigger,
+separate algorithm and isn't built. Out of scope: Facets/Mesh/Workbench (ANSYS's
 simulation pipeline) and Keyshot (a separate third-party renderer) —
 those aren't CAD modeling.
 

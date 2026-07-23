@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail, sheet_metal
 from dcad.kernel.document import Document
 
 
@@ -285,6 +285,156 @@ def test_detail_project_view_rejects_unknown_view():
 def test_detail_project_view_rejects_empty_shapes():
     with pytest.raises(ValueError):
         detail.project_view([], "front")
+
+
+def test_bend_allowance_matches_standard_formula():
+    # BA = angle_rad * (radius + k_factor * thickness)
+    expected = math.radians(90) * (1.0 + 0.33 * 0.1)
+    assert math.isclose(sheet_metal.bend_allowance(1.0, 90, 0.1, 0.33), expected, rel_tol=1e-9)
+
+
+def test_bend_allowance_rejects_bad_inputs():
+    with pytest.raises(ValueError):
+        sheet_metal.bend_allowance(-1.0, 90, 0.1)
+    with pytest.raises(ValueError):
+        sheet_metal.bend_allowance(1.0, 90, 0.1, k_factor=1.5)
+
+
+def test_flat_length_adds_segments_and_bend_allowance():
+    ba = sheet_metal.bend_allowance(0.5, 90, 0.2, 0.33)
+    assert math.isclose(sheet_metal.flat_length(3.0, 0.5, 90, 0.2, 0.33), 3.0 + ba, rel_tol=1e-9)
+
+
+def _top_face(shape):
+    best, best_z = None, -1e9
+    for face in all_faces(shape):
+        z = face_centroid(face)[2]
+        if z > best_z:
+            best_z, best = z, face
+    return best
+
+
+def _edge_at_x(shape, target_x, target_z):
+    for edge in all_edges(shape):
+        props = GProp_GProps()
+        BRepGProp.LinearProperties_s(edge, props)
+        centroid = props.CentreOfMass()
+        if math.isclose(centroid.X(), target_x, abs_tol=1e-6) and math.isclose(centroid.Z(), target_z, abs_tol=1e-6):
+            return edge
+    raise AssertionError(f"no edge found at x={target_x}, z={target_z}")
+
+
+def test_make_flange_spans_exact_edge_length():
+    from OCP.gp import gp_Dir
+
+    thickness = 0.2
+    sheet = primitives.make_box(4, 4, thickness)
+    face = _top_face(sheet)
+    edge = _edge_at_x(sheet, 4.0, thickness)
+
+    flange = sheet_metal.make_flange(face, edge, gp_Dir(1, 0, 0), thickness, 1.0, 90.0, 0.3)
+    # Bound the flange's own extent along the edge direction (Y) and check
+    # it matches the edge's actual span [0, 4], not shifted by half its
+    # length (the midpoint-vs-endpoint bug this was written to catch).
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(flange, box)
+    ymin, ymax = box.Get()[1], box.Get()[4]
+    assert math.isclose(ymin, 0.0, abs_tol=1e-4)
+    assert math.isclose(ymax, 4.0, abs_tol=1e-4)
+
+
+def test_make_flange_volume_is_additive_bend_plus_wall():
+    from OCP.gp import gp_Dir
+
+    thickness = 0.2
+    bend_radius = 0.3
+    wall_length = 1.0
+    angle_deg = 90.0
+    edge_length = 4.0
+    sheet = primitives.make_box(edge_length, edge_length, thickness)
+    face = _top_face(sheet)
+    edge = _edge_at_x(sheet, edge_length, thickness)
+
+    flange = sheet_metal.make_flange(face, edge, gp_Dir(1, 0, 0), thickness, wall_length, angle_deg, bend_radius)
+    full = booleans.union(sheet, flange)
+
+    expected_bend_volume = math.radians(angle_deg) / 2 * ((bend_radius + thickness) ** 2 - bend_radius ** 2) * edge_length
+    expected_wall_volume = wall_length * edge_length * thickness
+    expected_total = volume_of(sheet) + expected_bend_volume + expected_wall_volume
+    # Exact volume additivity is strong evidence the bend and wall don't
+    # overlap each other or the base sheet -- if they did, the union's
+    # volume would come out short of this sum.
+    assert math.isclose(volume_of(full), expected_total, rel_tol=1e-4)
+
+
+def test_make_flange_rejects_curved_edge_or_nonplanar_face():
+    from OCP.gp import gp_Dir
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GeomAbs import GeomAbs_Line
+
+    cylinder = primitives.make_cylinder(1, 2)
+    curved_edge = next(
+        e for e in all_edges(cylinder)
+        if BRepAdaptor_Curve(e).GetType() != GeomAbs_Line
+    )
+    curved_face = cylindrical_face(cylinder)
+    straight_edge = _edge_along(primitives.make_box(1, 1, 1), "x", 1.0)
+    flat_face = first_face(primitives.make_box(1, 1, 1))
+
+    with pytest.raises(ValueError):
+        sheet_metal.make_flange(flat_face, curved_edge, gp_Dir(1, 0, 0), 0.1, 1.0, 90.0, 0.2)
+    with pytest.raises(ValueError):
+        sheet_metal.make_flange(curved_face, straight_edge, gp_Dir(1, 0, 0), 0.1, 1.0, 90.0, 0.2)
+
+
+def test_make_flange_rejects_bad_dimensions():
+    from OCP.gp import gp_Dir
+
+    sheet = primitives.make_box(2, 2, 0.2)
+    face = _top_face(sheet)
+    edge = _edge_at_x(sheet, 2.0, 0.2)
+    with pytest.raises(ValueError):
+        sheet_metal.make_flange(face, edge, gp_Dir(1, 0, 0), -0.1, 1.0, 90.0, 0.2)
+    with pytest.raises(ValueError):
+        sheet_metal.make_flange(face, edge, gp_Dir(1, 0, 0), 0.1, 1.0, 200.0, 0.2)
+
+
+def test_infer_base_face_picks_largest_area_face_at_edge():
+    thickness = 0.2
+    sheet = primitives.make_box(4, 4, thickness)
+    edge = _edge_at_x(sheet, 4.0, thickness)
+    inferred = sheet_metal.infer_base_face(sheet, edge)
+    assert math.isclose(face_centroid(inferred)[2], thickness, abs_tol=1e-6)
+
+
+def test_infer_outward_direction_points_away_from_sheet():
+    thickness = 0.2
+    sheet = primitives.make_box(4, 4, thickness)
+    face = _top_face(sheet)
+    edge = _edge_at_x(sheet, 4.0, thickness)
+    outward = sheet_metal.infer_outward_direction(face, edge)
+    assert outward.X() > 0.9  # points further in +X, away from the sheet's body (x in [0,4])
+
+
+def test_infer_and_make_flange_end_to_end():
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    thickness = 0.2
+    sheet = primitives.make_box(4, 4, thickness)
+    edge = _edge_at_x(sheet, 4.0, thickness)
+    base_face = sheet_metal.infer_base_face(sheet, edge)
+    outward = sheet_metal.infer_outward_direction(base_face, edge)
+
+    flange = sheet_metal.make_flange(base_face, edge, outward, thickness, 1.0, 90.0, 0.3)
+    full = booleans.union(sheet, flange)
+    box = Bnd_Box()
+    BRepBndLib.Add_s(full, box)
+    xmax = box.Get()[3]
+    assert xmax > 4.0  # the flange extends past the sheet's original edge
 
 
 def test_document_add_remove():

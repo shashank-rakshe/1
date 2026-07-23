@@ -461,6 +461,16 @@ def _icon_view_iso():
     return c.finish()
 
 
+def _icon_flange():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(4, 16, 16, 6))
+    p.setPen(c.accent_pen(1.8))
+    p.drawArc(QRectF(14, 4, 12, 12), 200 * 16, 100 * 16)
+    p.drawLine(_pt(20, 5), _pt(20, 13))
+    return c.finish()
+
+
 _BUILDERS = {
     "select": _icon_select,
     "box": _icon_box,
@@ -505,6 +515,7 @@ _BUILDERS = {
     "view_top": _icon_view_top,
     "view_right": _icon_view_right,
     "view_iso": _icon_view_iso,
+    "flange": _icon_flange,
 }
 
 _cache = {}
