@@ -61,10 +61,8 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # TEMP DEBUG: shows a console window with real stdout/stderr
-    # so we can see exactly what happens on startup (Qt/OCCT diagnostics,
-    # any traceback) instead of guessing from exit codes and log files.
-    # Switch back to console=False once dcad actually opens correctly.
+    console=False,  # normal windowed app -- main.py's crash-log/message-box
+    # handling covers startup errors now that the app is confirmed working.
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
