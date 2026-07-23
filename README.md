@@ -262,16 +262,29 @@ license-only). Use STEP/IGES as the exchange format instead.
 
 ## Packaging as an executable (Windows)
 
-Two files at the repo root turn this into a real "download one file, double-
-click, installed" experience for a user with no Python setup at all —
-`dcad.spec` (PyInstaller: bundles the app + every dependency into one
-`dcad.exe`) and `installer.iss` (Inno Setup: wraps that exe into an actual
-installer wizard with Start Menu/Desktop shortcuts and an uninstaller).
+Three files at the repo root turn this into a real "download one file,
+double-click, installed" experience for a user with no Python setup at
+all — `dcad.spec` (PyInstaller: bundles the app + every dependency into
+one `dcad.exe`), `installer.iss` (Inno Setup: wraps that exe into an
+actual installer wizard with Start Menu/Desktop shortcuts and an
+uninstaller), and `build_installer.bat`, which runs every step below in
+one double-click.
 
-Both **must be built on Windows** — OCCT and Qt are compiled native
-binaries, so a Linux box can't cross-compile a `.exe` (that's also why this
-Linux dev session can't just hand you a finished installer directly;
-someone needs to run this on an actual Windows machine). Steps:
+All of this **must be built on Windows** — OCCT and Qt are compiled
+native binaries, so a Linux box can't cross-compile a `.exe` (that's also
+why this Linux dev session can't just hand you a finished installer
+directly, or run `build_installer.bat` itself; someone needs to run it on
+an actual Windows machine — there's no Windows environment available to
+this session to build it in). Steps:
+
+**Fastest path**: clone the repo, check out this branch, then
+double-click `build_installer.bat` (or run it from a command prompt) —
+it creates the virtual environment, installs dependencies, builds
+`dist\dcad.exe`, and (if [Inno Setup](https://jrsoftware.org/isdl.php) is
+installed) also builds `installer_output\dcad-setup.exe`. Needs Python
+3.11+ on PATH; the script tells you if it's missing.
+
+**Manual/step-by-step**, if you'd rather see each step:
 
 ```
 git clone <this repo> dcad
