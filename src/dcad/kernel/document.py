@@ -17,6 +17,7 @@ class DocObject:
     id: int
     shape: TopoDS_Shape
     name: str = ""
+    group_path: tuple[str, ...] = ()  # ancestor assembly names, from STEP import
 
     def __post_init__(self):
         if not self.name:
@@ -58,8 +59,8 @@ class Document:
     def can_redo(self) -> bool:
         return bool(self._redo_stack)
 
-    def add(self, shape: TopoDS_Shape, name: str = "") -> DocObject:
-        obj = DocObject(id=next(_ids), shape=shape, name=name)
+    def add(self, shape: TopoDS_Shape, name: str = "", group_path: tuple[str, ...] = ()) -> DocObject:
+        obj = DocObject(id=next(_ids), shape=shape, name=name, group_path=group_path)
         self.objects.append(obj)
         return obj
 
@@ -68,7 +69,7 @@ class Document:
 
     def replace_shape(self, obj: DocObject, new_shape: TopoDS_Shape) -> DocObject:
         idx = self.objects.index(obj)
-        new_obj = DocObject(id=obj.id, shape=new_shape, name=obj.name)
+        new_obj = DocObject(id=obj.id, shape=new_shape, name=obj.name, group_path=obj.group_path)
         self.objects[idx] = new_obj
         return new_obj
 

@@ -9,12 +9,12 @@ from dcad.viewport.occt_viewer import tessellate
 
 
 class StepImportWorker(QThread):
-    """Reads a STEP file and tessellates every root shape off the UI
+    """Reads a STEP file and tessellates every leaf part off the UI
     thread, so a big structural model doesn't freeze the app while it
     loads (the same reason Mayo and other production viewers do this
     off-thread rather than blocking on file I/O + meshing)."""
 
-    succeeded = Signal(list)  # list[TopoDS_Shape]
+    succeeded = Signal(list)  # list[tuple[str, TopoDS_Shape, tuple[str, ...]]]
     failed = Signal(str)
 
     def __init__(self, path: str, parent=None):
@@ -23,10 +23,10 @@ class StepImportWorker(QThread):
 
     def run(self) -> None:
         try:
-            shapes = io_step.import_step_multi(self._path)
-            for shape in shapes:
+            parts = io_step.import_step_assembly(self._path)
+            for _name, shape, _group_path in parts:
                 tessellate(shape)
         except Exception as exc:
             self.failed.emit(str(exc))
             return
-        self.succeeded.emit(shapes)
+        self.succeeded.emit(parts)

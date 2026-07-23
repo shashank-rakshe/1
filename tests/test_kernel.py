@@ -145,6 +145,96 @@ def test_step_import_multi_keeps_parts_separate(tmp_path):
         assert math.isclose(got, want, rel_tol=1e-4)
 
 
+def _write_xcaf_step(path: str, named_parts, assemblies=()):
+    """Test helper: writes a STEP file via OCCT's XDE/XCAF layer so
+    `import_step_assembly()` has real part names and assembly structure to
+    read back, mirroring what a real STEP export from another CAD tool
+    carries. `named_parts` is [(name, shape), ...]; `assemblies` is
+    [(assembly_name, [part_index, ...]), ...] grouping those parts under a
+    named assembly label."""
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+
+    app = XCAFApp_Application.GetApplication_s()
+    doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.InitDocument(doc)
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+
+    part_labels = []
+    for name, shape in named_parts:
+        label = shape_tool.AddShape(shape, False)
+        TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
+        part_labels.append(label)
+
+    grouped = {idx for _name, indices in assemblies for idx in indices}
+    for asm_name, indices in assemblies:
+        asm_label = shape_tool.NewShape()
+        TDataStd_Name.Set_s(asm_label, TCollection_ExtendedString(asm_name))
+        for idx in indices:
+            shape_tool.AddComponent(asm_label, part_labels[idx], TopLoc_Location())
+    for idx, label in enumerate(part_labels):
+        if idx in grouped:
+            shape_tool.RemoveShape(label)
+    shape_tool.UpdateAssemblies()
+
+    writer = STEPCAFControl_Writer()
+    writer.SetNameMode(True)
+    writer.Transfer(doc)
+    writer.Write(str(path))
+
+
+def test_import_step_assembly_reads_names(tmp_path):
+    box = primitives.make_box(1, 1, 1)
+    sphere = primitives.make_sphere(1)
+    path = tmp_path / "named.step"
+    _write_xcaf_step(str(path), [("Bracket", box), ("Bolt", sphere)])
+
+    parts = io_step.import_step_assembly(str(path))
+    assert len(parts) == 2
+    by_name = {name: shape for name, shape, _group_path in parts}
+    assert set(by_name) == {"Bracket", "Bolt"}
+    assert math.isclose(volume_of(by_name["Bracket"]), volume_of(box), rel_tol=1e-4)
+    assert math.isclose(volume_of(by_name["Bolt"]), volume_of(sphere), rel_tol=1e-4)
+    assert all(group_path == () for _name, _shape, group_path in parts)
+
+
+def test_import_step_assembly_reads_nested_groups(tmp_path):
+    box = primitives.make_box(1, 1, 1)
+    sphere = primitives.make_sphere(1)
+    path = tmp_path / "nested.step"
+    _write_xcaf_step(
+        str(path),
+        [("BracketPart", box), ("BoltPart", sphere)],
+        assemblies=[("SubAssembly1", [0, 1])],
+    )
+
+    parts = io_step.import_step_assembly(str(path))
+    assert len(parts) == 2
+    names = {name for name, _shape, _group_path in parts}
+    assert names == {"BracketPart", "BoltPart"}
+    for _name, _shape, group_path in parts:
+        assert group_path == ("SubAssembly1",)
+
+
+def test_import_step_assembly_falls_back_without_xdedata(tmp_path):
+    box = primitives.make_box(1, 1, 1)
+    sphere = primitives.make_sphere(1)
+    path = tmp_path / "plain.step"
+    io_step.export_step([box, sphere], str(path))
+
+    parts = io_step.import_step_assembly(str(path))
+    assert len(parts) == 2
+    volumes = sorted(volume_of(shape) for _name, shape, _group_path in parts)
+    expected = sorted([volume_of(box), volume_of(sphere)])
+    for got, want in zip(volumes, expected):
+        assert math.isclose(got, want, rel_tol=1e-4)
+
+
 def face_centroid(face):
     props = GProp_GProps()
     BRepGProp.SurfaceProperties_s(face, props)

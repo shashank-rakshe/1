@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QProgressDialog,
+    QWidget,
+    QVBoxLayout,
 )
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
@@ -57,7 +59,21 @@ class MainWindow(QMainWindow):
 
         self.document = Document()
         self.viewport = ViewportWidget(self)
-        self.setCentralWidget(self.viewport)
+        # The viewport's native OCCT window must not be QMainWindow's
+        # direct central widget: on Windows, a native child HWND set as
+        # QMainWindow's central widget can end up with a stale/oversized
+        # win32 rect from before the toolbar/dock layout settles, so it
+        # silently swallows clicks meant for the ribbon and docks above it
+        # (mouse drag/scroll inside the viewport itself still worked, since
+        # those go directly to that HWND -- only clicks elsewhere on the
+        # window were lost). Wrapping it in a plain widget + layout forces
+        # normal Qt layout geometry management instead of relying on
+        # QMainWindow's own central-widget resize path.
+        viewport_container = QWidget(self)
+        viewport_layout = QVBoxLayout(viewport_container)
+        viewport_layout.setContentsMargins(0, 0, 0, 0)
+        viewport_layout.addWidget(self.viewport)
+        self.setCentralWidget(viewport_container)
         self.viewport.picked.connect(self._on_picked)
         self.viewport.sketch_clicked.connect(self._on_sketch_clicked)
         self.viewport.sketch_hover.connect(self._on_sketch_hover)
@@ -408,12 +424,38 @@ class MainWindow(QMainWindow):
         self._refresh_structure_tree()
 
     def _refresh_structure_tree(self):
+        """Rebuild the tree, grouping parts under their STEP assembly path
+        (`DocObject.group_path`) instead of always listing everything flat
+        -- an imported assembly's sub-components now nest the same way
+        they did in the source file, matching how SpaceClaim shows an
+        imported assembly's structure."""
         self.structure_tree.clear()
+        group_items: dict[tuple[str, ...], QTreeWidgetItem] = {}
+
+        def group_item(path: tuple[str, ...]) -> QTreeWidgetItem | None:
+            if not path:
+                return None
+            if path in group_items:
+                return group_items[path]
+            item = QTreeWidgetItem([path[-1]])
+            parent = group_item(path[:-1])
+            if parent is None:
+                self.structure_tree.addTopLevelItem(item)
+            else:
+                parent.addChild(item)
+            group_items[path] = item
+            return item
+
         for obj in self.document.objects:
             label = f"{obj.name} (Anchored)" if obj.id in self._anchored_ids else obj.name
             item = QTreeWidgetItem([label])
             item.setData(0, Qt.ItemDataRole.UserRole, obj.id)
-            self.structure_tree.addTopLevelItem(item)
+            parent = group_item(obj.group_path)
+            if parent is None:
+                self.structure_tree.addTopLevelItem(item)
+            else:
+                parent.addChild(item)
+        self.structure_tree.expandAll()
 
     def _on_structure_item_clicked(self, item, _column):
         shape_id = item.data(0, Qt.ItemDataRole.UserRole)
@@ -499,6 +541,24 @@ class MainWindow(QMainWindow):
         for i, shape in enumerate(shapes):
             name = f"{name_prefix}{i + 1}" if name_prefix else ""
             obj = self.document.add(shape, name=name)
+            self.viewport.viewer.display_shape(obj.id, shape)
+            objs.append(obj)
+        self.viewport.fit_all()
+        self._refresh_structure_tree()
+        self.statusBar().showMessage(f"Added {len(objs)} part(s)")
+        return objs
+
+    def _add_step_parts_to_scene(self, parts, name_prefix: str = ""):
+        """Like `_add_many_to_scene`, but for `io_step.import_step_assembly()`
+        results: each part carries its own STEP name (if any) and its
+        assembly-group path, both preserved on the DocObject so the
+        structure tree can show the file's actual part names and assembly
+        nesting instead of a flat, numbered list."""
+        objs = []
+        for i, (name, shape, group_path) in enumerate(parts):
+            if not name:
+                name = f"{name_prefix}{i + 1}" if name_prefix else ""
+            obj = self.document.add(shape, name=name, group_path=group_path)
             self.viewport.viewer.display_shape(obj.id, shape)
             objs.append(obj)
         self.viewport.fit_all()
@@ -1370,10 +1430,10 @@ class MainWindow(QMainWindow):
         # instead of freezing for the duration of the import.
         worker = StepImportWorker(path, self)
 
-        def on_succeeded(shapes):
+        def on_succeeded(parts):
             progress.close()
             self.document.snapshot()
-            self._add_many_to_scene(shapes, name_prefix=Path(path).stem + "_")
+            self._add_step_parts_to_scene(parts, name_prefix=Path(path).stem + "_")
             self._step_import_worker = None
 
         def on_failed(message):
