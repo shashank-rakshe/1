@@ -233,6 +233,39 @@ def test_orient_edges_rejects_curved_edges():
         assembly.orient_edges(cylinder, curved, straight)
 
 
+def test_face_index_round_trips_through_a_rigid_transform():
+    box = primitives.make_box(1, 2, 3)
+    top = max(all_faces(box), key=lambda f: face_centroid(f)[2])
+    index = assembly.face_index(box, top)
+
+    moved = transform.translate(box, 5, 0, 0)
+    relocated = assembly.nth_face(moved, index)
+    # Same face, just shifted -- centroid moves by exactly the translation.
+    c_before, c_after = face_centroid(top), face_centroid(relocated)
+    assert math.isclose(c_after[0] - c_before[0], 5.0, abs_tol=1e-6)
+    assert math.isclose(c_after[1], c_before[1], abs_tol=1e-6)
+    assert math.isclose(c_after[2], c_before[2], abs_tol=1e-6)
+
+
+def test_edge_index_round_trips_through_a_rigid_transform():
+    box = primitives.make_box(2, 1, 1)
+    edge = _edge_along(box, "x", 2.0)
+    index = assembly.edge_index(box, edge)
+
+    moved = transform.translate(box, 0, 0, 7)
+    relocated = assembly.nth_edge(moved, index)
+    length, direction = edge_length_and_dir(relocated)
+    assert math.isclose(length, 2.0, rel_tol=1e-6)
+    assert abs(direction.X()) > 0.9
+
+
+def test_face_index_rejects_face_not_in_shape():
+    box_a = primitives.make_box(1, 1, 1)
+    box_b = primitives.make_box(1, 1, 1)
+    with pytest.raises(ValueError):
+        assembly.face_index(box_a, first_face(box_b))
+
+
 def _span(segments, axis: int) -> float:
     coords = [p[axis] for seg in segments for p in seg]
     return max(coords) - min(coords)

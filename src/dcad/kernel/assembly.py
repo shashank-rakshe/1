@@ -2,14 +2,61 @@
 with another's (SpaceClaim's Assembly > Align), and rotating a component
 so a picked edge points the same way as another's (Assembly > Orient)."""
 
-from OCP.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge
-from OCP.TopAbs import TopAbs_REVERSED
+from OCP.TopoDS import TopoDS_Shape, TopoDS_Face, TopoDS_Edge, TopoDS
+from OCP.TopAbs import TopAbs_REVERSED, TopAbs_FACE, TopAbs_EDGE
+from OCP.TopExp import TopExp_Explorer
 from OCP.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
 from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Line
 from OCP.BRepGProp import BRepGProp
 from OCP.GProp import GProp_GProps
 from OCP.gp import gp_Ax3, gp_Trsf, gp_Pnt, gp_Dir
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+
+
+def face_index(shape: TopoDS_Shape, face: TopoDS_Face) -> int:
+    """Index of `face` within `shape`'s own TopExp_Explorer(FACE) order --
+    a deliberately simple stand-in for OCCT's "persistent naming" problem.
+    Valid only across pure rigid transforms (Move/Rotate/Align/Orient),
+    which preserve topology order; a boolean or direct-edit operation
+    rebuilds topology and invalidates it. Used to re-locate a picked face
+    after its owning shape has since been transformed (live constraints)."""
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    index = 0
+    while explorer.More():
+        if explorer.Current().IsSame(face):
+            return index
+        index += 1
+        explorer.Next()
+    raise ValueError("face not found in shape")
+
+
+def nth_face(shape: TopoDS_Shape, index: int) -> TopoDS_Face:
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    for _ in range(index):
+        explorer.Next()
+    if not explorer.More():
+        raise ValueError(f"shape has no face at index {index}")
+    return TopoDS.Face_s(explorer.Current())
+
+
+def edge_index(shape: TopoDS_Shape, edge: TopoDS_Edge) -> int:
+    explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    index = 0
+    while explorer.More():
+        if explorer.Current().IsSame(edge):
+            return index
+        index += 1
+        explorer.Next()
+    raise ValueError("edge not found in shape")
+
+
+def nth_edge(shape: TopoDS_Shape, index: int) -> TopoDS_Edge:
+    explorer = TopExp_Explorer(shape, TopAbs_EDGE)
+    for _ in range(index):
+        explorer.Next()
+    if not explorer.More():
+        raise ValueError(f"shape has no edge at index {index}")
+    return TopoDS.Edge_s(explorer.Current())
 
 
 def _face_centroid(face: TopoDS_Face) -> gp_Pnt:

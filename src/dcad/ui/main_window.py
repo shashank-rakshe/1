@@ -69,6 +69,12 @@ class MainWindow(QMainWindow):
         self.align_picks = []  # [(DocObject, TopoDS_Face), ...] -- moving pick first, stationary second
         self.orient_picks = []  # [(DocObject, TopoDS_Edge), ...] -- moving pick first, target pick second
         self._anchored_ids = set()  # SpaceClaim's Assembly > Anchor: locks a part in place
+        # Live assembly constraints: each dict is {"kind": "align"|"orient",
+        # "moving_id", "moving_index", "stationary_id", "stationary_index"}.
+        # When the stationary object moves, the moving object re-solves to
+        # stay coincident -- SpaceClaim's real assembly components do this
+        # for any constraint, not just the one just applied.
+        self._live_constraints = []
 
         self.interactive_sketch_active = False
         self.interactive_sketch_finish_mode = None  # "extrude" | "revolve"
@@ -263,6 +269,10 @@ class MainWindow(QMainWindow):
                 self.viewport.viewer.remove_shape(shape_id)
                 self.document.remove(obj)
                 self._anchored_ids.discard(shape_id)
+        self._live_constraints = [
+            c for c in self._live_constraints
+            if c["moving_id"] not in ids and c["stationary_id"] not in ids
+        ]
         self._sync_viewport()
         self.statusBar().showMessage(f"Deleted {len(ids)} object(s)")
 
@@ -276,6 +286,58 @@ class MainWindow(QMainWindow):
             )
             return False
         return True
+
+    def _record_live_constraint(self, kind, moving_id, moving_index, stationary_id, stationary_index):
+        # Re-applying the same pair replaces the old entry rather than
+        # stacking a second, redundant one.
+        self._live_constraints = [
+            c for c in self._live_constraints
+            if not (c["moving_id"] == moving_id and c["stationary_id"] == stationary_id)
+        ]
+        self._live_constraints.append({
+            "kind": kind,
+            "moving_id": moving_id,
+            "moving_index": moving_index,
+            "stationary_id": stationary_id,
+            "stationary_index": stationary_index,
+        })
+
+    def _propagate_constraints_from(self, stationary_id: int, _visited=None):
+        """Re-solve every live constraint anchored on `stationary_id`, now
+        that its shape has just changed -- SpaceClaim's real assembly
+        components do this for any constraint whenever the part they're
+        attached to moves, not just right after the constraint is made.
+        `_visited` guards against a constraint cycle (A stationary for B,
+        B stationary for A) recursing forever."""
+        visited = _visited if _visited is not None else set()
+        if stationary_id in visited:
+            return
+        visited.add(stationary_id)
+        stationary_obj = self.document.get(stationary_id)
+        if stationary_obj is None:
+            return
+
+        for constraint in self._live_constraints:
+            if constraint["stationary_id"] != stationary_id:
+                continue
+            moving_obj = self.document.get(constraint["moving_id"])
+            if moving_obj is None or moving_obj.id in self._anchored_ids:
+                continue
+            try:
+                if constraint["kind"] == "align":
+                    stationary_ref = assembly.nth_face(stationary_obj.shape, constraint["stationary_index"])
+                    moving_ref = assembly.nth_face(moving_obj.shape, constraint["moving_index"])
+                    new_shape = assembly.align_faces(moving_obj.shape, moving_ref, stationary_ref)
+                else:
+                    stationary_ref = assembly.nth_edge(stationary_obj.shape, constraint["stationary_index"])
+                    moving_ref = assembly.nth_edge(moving_obj.shape, constraint["moving_index"])
+                    new_shape = assembly.orient_edges(moving_obj.shape, moving_ref, stationary_ref)
+            except Exception:
+                continue  # topology changed too much to re-locate the face/edge; leave it as-is
+
+            self.document.replace_shape(moving_obj, new_shape)
+            self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
+            self._propagate_constraints_from(moving_obj.id, visited)
 
     def toggle_anchor(self):
         ids = self.viewport.selected_shape_ids()
@@ -970,6 +1032,7 @@ class MainWindow(QMainWindow):
         new_shape = transform.translate(obj.shape, *offset)
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._propagate_constraints_from(obj.id)
         self._sync_viewport()
         self.statusBar().showMessage(f"Moved {obj.name}")
 
@@ -986,6 +1049,7 @@ class MainWindow(QMainWindow):
         new_shape = transform.rotate(obj.shape, angle)
         self.document.replace_shape(obj, new_shape)
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._propagate_constraints_from(obj.id)
         self._sync_viewport()
         self.statusBar().showMessage(f"Rotated {obj.name} by {angle:g} deg")
 
@@ -1130,6 +1194,8 @@ class MainWindow(QMainWindow):
         if not self._check_not_anchored(moving_obj):
             return
         try:
+            moving_index = assembly.face_index(moving_obj.shape, moving_face)
+            stationary_index = assembly.face_index(stationary_obj.shape, stationary_face)
             new_shape = assembly.align_faces(moving_obj.shape, moving_face, stationary_face)
         except Exception as exc:
             QMessageBox.warning(self, "Align failed", str(exc))
@@ -1137,6 +1203,8 @@ class MainWindow(QMainWindow):
         self.document.snapshot()
         self.document.replace_shape(moving_obj, new_shape)
         self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
+        self._record_live_constraint("align", moving_obj.id, moving_index, stationary_obj.id, stationary_index)
+        self._propagate_constraints_from(moving_obj.id)
         self._sync_viewport()
         self.statusBar().showMessage(f"Aligned {moving_obj.name} to {stationary_obj.name}")
 
@@ -1155,6 +1223,8 @@ class MainWindow(QMainWindow):
         if not self._check_not_anchored(moving_obj):
             return
         try:
+            moving_index = assembly.edge_index(moving_obj.shape, moving_edge)
+            target_index = assembly.edge_index(target_obj.shape, target_edge)
             new_shape = assembly.orient_edges(moving_obj.shape, moving_edge, target_edge)
         except Exception as exc:
             QMessageBox.warning(self, "Orient failed", str(exc))
@@ -1162,6 +1232,8 @@ class MainWindow(QMainWindow):
         self.document.snapshot()
         self.document.replace_shape(moving_obj, new_shape)
         self.viewport.viewer.redisplay_shape(moving_obj.id, new_shape)
+        self._record_live_constraint("orient", moving_obj.id, moving_index, target_obj.id, target_index)
+        self._propagate_constraints_from(moving_obj.id)
         self._sync_viewport()
         self.statusBar().showMessage(f"Oriented {moving_obj.name} to match {target_obj.name}")
 

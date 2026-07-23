@@ -93,9 +93,13 @@ SpaceClaim's artwork or branding, which are ANSYS's proprietary assets.
   the edge it should point the same way as — SpaceClaim's real follow-up
   to Align, for fixing the rotation *about* an axis/plane Align already
   made coincident (Align alone leaves that rotation at whatever the
-  faces' default frames produce). **Anchor**: select one or more solids
-  and toggle Anchor to lock their position — anchored parts show
+  faces' default frames produce). Both are **live**: once applied, Moving
+  or Rotating the part they're anchored to makes the constrained part
+  automatically re-solve to stay coincident, like a real assembled
+  component — not just a one-shot snap. **Anchor**: select one or more
+  solids and toggle Anchor to lock their position — anchored parts show
   "(Anchored)" in the Structure tree and refuse Move/Rotate/Align/Orient
+  (including being dragged along by someone else's live constraint)
   until un-anchored (also in the right-click menu).
 - **Detail tab** — **Front / Top / Right / Isometric**: opens a 2D
   hidden-line-removed drawing view of the whole model in its own window
@@ -168,11 +172,12 @@ Repair (Stitch/Fill/Merge Faces), Prepare (Interference/Enclosure/Share
 Topology), STEP/IGES import-export, native project save/load, a ribbon
 UI with original icons and a Structure tree, orbit/pan/zoom viewport
 with solid/face/edge picking, Ctrl/Shift+click multi-select, a
-selection-aware right-click context menu, Delete, Assembly (Align
-faces/axes, Orient edges, Anchor to lock a part in place), Detail
-(Front/Top/Right/Isometric hidden-line-removed 2D drawing views), and
+selection-aware right-click context menu, Delete, Assembly (live Align
+faces/axes and Orient edges that re-solve when the part they're anchored
+to moves, Anchor to lock a part in place), Detail (Front/Top/Right/
+Isometric hidden-line-removed 2D drawing views), and
 Sheet Metal (Flange, plus standalone bend-allowance/flat-length math).
-97 kernel tests + a full end-to-end GUI smoke test (including real
+100 kernel tests + a full end-to-end GUI smoke test (including real
 synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
@@ -222,10 +227,17 @@ Measure, Facets, Detail, Repair, Prepare, Workbench, Mesh, Sheet Metal,
 Tools, Display, Keyshot). This project now covers Design/Sketch/Assembly/
 Measure/Repair/Prepare/Detail/Sheet Metal (Measure+Prepare shown as
 "Inspect"+"Prepare" here) — 8 of 13. Assembly currently has Align, Orient,
-and Anchor — real SpaceClaim's Assembly also has full assembly-constraint
-components (Rigid/Tangent/Gear conditions, multi-configuration mates that
-persist and re-solve as parts move); those aren't built, so Align/Orient
-here are one-shot moves, not a live constraint. Detail currently opens
+and Anchor, and Align/Orient are now *live*: apply one, then Move/Rotate
+the part it was anchored to, and the constrained part re-solves to stay
+coincident (`MainWindow._propagate_constraints_from`, using a face/edge
+re-located by index -- valid across rigid transforms, not across booleans
+or direct-edit, which rebuild topology). Real SpaceClaim's Assembly also
+has full assembly-constraint components (Rigid/Tangent/Gear conditions,
+multi-configuration mates, constraint-aware Move handles that disable
+the axes a constraint already fixes); those aren't built -- this is a
+single always-on Align/Orient relationship per part pair, not a general
+constraint system with its own UI for reviewing/deleting constraints.
+Detail currently opens
 one hidden-line view per window with no sheet layout, title block, or
 dimensioning — real SpaceClaim places multiple views on a shared
 drawing sheet and lets you add dimension/annotation callouts; that

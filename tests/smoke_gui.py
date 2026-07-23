@@ -762,6 +762,56 @@ def run():
             assert math.isclose(volume_of(thickened.shape), 6.0 * 4.0 * 1.0, rel_tol=1e-4), "constrained sketch should pull to an exact 6x4x1 box"
         except Exception as exc:
             errors.append(("sketch_constraints", exc))
+        QTimer.singleShot(200, step_live_constraints)
+
+    def step_live_constraints():
+        # Live assembly constraints: Align box A's bottom face to box B's
+        # top face, then Move box B -- A should automatically re-follow to
+        # stay coincident, the way a real assembled component would.
+        try:
+            from OCP.gp import gp_Pnt
+            from dcad.kernel import primitives
+
+            box_a = window._add_to_scene(primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 5)), name="LiveMoving")
+            box_b = window._add_to_scene(primitives.make_box(1, 1, 1, gp_Pnt(0, 0, 0)), name="LiveStationary")
+
+            bottom_a = min(all_faces_of(box_a.shape), key=face_z)
+            top_b = max(all_faces_of(box_b.shape), key=face_z)
+
+            window._tool_actions["align"].setChecked(True)
+            window._on_picked(bottom_a, box_a.id)
+            window._on_picked(top_b, box_b.id)
+            window._tool_actions["align"].setChecked(False)
+
+            assert any(
+                c["moving_id"] == box_a.id and c["stationary_id"] == box_b.id
+                for c in window._live_constraints
+            ), "Align should have recorded a live constraint"
+
+            aligned_a = window.document.get(box_a.id)
+            assert math.isclose(min(face_z(f) for f in all_faces_of(aligned_a.shape)), 1.0, abs_tol=1e-6)
+
+            # Move the stationary box -- the aligned one should follow.
+            select_by_ids(window, [box_b.id])
+            with patch.object(QInputDialog, "getText", return_value=("10, 0, 0", True)):
+                window.do_move()
+
+            followed_a = window.document.get(box_a.id)
+            new_bottom_face = min(all_faces_of(followed_a.shape), key=face_z)
+            assert math.isclose(face_z(new_bottom_face), 1.0, abs_tol=1e-6), "LiveMoving should still sit on top of LiveStationary after it moved"
+
+            # Confirm it actually followed in X too, not just stayed put in Z.
+            from OCP.BRepGProp import BRepGProp
+            from OCP.GProp import GProp_GProps
+
+            def face_x(face):
+                props = GProp_GProps()
+                BRepGProp.SurfaceProperties_s(face, props)
+                return props.CentreOfMass().X()
+
+            assert math.isclose(face_x(new_bottom_face), 10.5, abs_tol=1e-6), "LiveMoving should have followed LiveStationary's X move"
+        except Exception as exc:
+            errors.append(("live_constraints", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():
