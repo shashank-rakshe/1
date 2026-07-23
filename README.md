@@ -260,10 +260,37 @@ Not possible: importing native `.scdoc` files (undocumented proprietary
 ANSYS format — no open reader exists); a Parasolid kernel (commercial,
 license-only). Use STEP/IGES as the exchange format instead.
 
-## Packaging as an executable
+## Packaging as an executable (Windows)
 
-Not yet set up. PyInstaller is the intended tool, but the build must run on
-the target OS — a Windows `.exe` has to be built on Windows (this project's
-native dependencies, OCCT and Qt, are OS-specific compiled binaries; a Linux
-box cannot cross-compile them). Ask to have the PyInstaller spec added when
-you're ready to build one.
+`dcad.spec` (repo root) is ready to go, but the build itself **must run on
+Windows** — OCCT and Qt are compiled native binaries, so a Linux box can't
+cross-compile a `.exe` (that's also why this Linux dev session can't just
+hand you a finished executable directly; someone needs to run this on an
+actual Windows machine). Steps, on Windows:
+
+```
+git clone <this repo> dcad
+cd dcad
+git checkout claude/new-session-unba9h
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pip install pyinstaller
+python main.py          REM sanity check: confirm the app runs from source first
+pyinstaller dcad.spec
+```
+
+Output: `dist\dcad\dcad.exe` — copy the whole `dist\dcad\` folder around
+together (it holds the OCCT/Qt DLLs the exe needs), don't move just the
+`.exe` on its own.
+
+This spec hasn't been build-tested (this session has no Windows machine to
+run it on) — OCCT packaging with PyInstaller is known to be finicky, so if
+`dcad.exe` fails to launch, the most likely fix is a missing native DLL that
+`collect_dynamic_libs("OCP")` didn't catch:
+- Run `pyinstaller dcad.spec` and watch the console output for `WARNING:
+  lib not found` lines — add any missing ones under `binaries=` in the spec.
+- If it builds but crashes on startup with an import error, add the missing
+  module name to `hidden_imports` in the spec and rebuild.
+- Antivirus/SmartScreen may flag a fresh, unsigned PyInstaller `.exe` —
+  that's expected for an unsigned build, not a sign anything's wrong.
