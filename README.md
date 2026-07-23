@@ -262,11 +262,16 @@ license-only). Use STEP/IGES as the exchange format instead.
 
 ## Packaging as an executable (Windows)
 
-`dcad.spec` (repo root) is ready to go, but the build itself **must run on
-Windows** — OCCT and Qt are compiled native binaries, so a Linux box can't
-cross-compile a `.exe` (that's also why this Linux dev session can't just
-hand you a finished executable directly; someone needs to run this on an
-actual Windows machine). Steps, on Windows:
+Two files at the repo root turn this into a real "download one file, double-
+click, installed" experience for a user with no Python setup at all —
+`dcad.spec` (PyInstaller: bundles the app + every dependency into one
+`dcad.exe`) and `installer.iss` (Inno Setup: wraps that exe into an actual
+installer wizard with Start Menu/Desktop shortcuts and an uninstaller).
+
+Both **must be built on Windows** — OCCT and Qt are compiled native
+binaries, so a Linux box can't cross-compile a `.exe` (that's also why this
+Linux dev session can't just hand you a finished installer directly;
+someone needs to run this on an actual Windows machine). Steps:
 
 ```
 git clone <this repo> dcad
@@ -280,17 +285,37 @@ python main.py          REM sanity check: confirm the app runs from source first
 pyinstaller dcad.spec
 ```
 
-Output: `dist\dcad\dcad.exe` — copy the whole `dist\dcad\` folder around
-together (it holds the OCCT/Qt DLLs the exe needs), don't move just the
-`.exe` on its own.
+That produces `dist\dcad.exe` — a single file with every dependency
+(PySide6, all of OCCT via OCP, numpy) bundled in; nothing else needs to
+ship alongside it. It's already double-clickable and runnable as-is.
 
-This spec hasn't been build-tested (this session has no Windows machine to
-run it on) — OCCT packaging with PyInstaller is known to be finicky, so if
-`dcad.exe` fails to launch, the most likely fix is a missing native DLL that
-`collect_dynamic_libs("OCP")` didn't catch:
+For an actual installer (Start Menu entry, uninstaller, no "just a loose
+.exe on your Desktop" feel), also install [Inno Setup](https://jrsoftware.org/isdl.php)
+(free) and run:
+
+```
+iscc installer.iss
+```
+
+Output: `installer_output\dcad-setup.exe` — that's the one file to hand to
+a user. Running it is the entire install experience: a wizard, a Start
+Menu shortcut, an optional Desktop shortcut, and a proper entry in "Add or
+Remove Programs."
+
+Neither file has been build-tested (this session has no Windows machine to
+run them on) — OCCT packaging with PyInstaller is known to be finicky, so
+if `dcad.exe` fails to launch after step 1, the most likely fix is a
+missing native DLL that `collect_dynamic_libs("OCP")` didn't catch:
 - Run `pyinstaller dcad.spec` and watch the console output for `WARNING:
   lib not found` lines — add any missing ones under `binaries=` in the spec.
 - If it builds but crashes on startup with an import error, add the missing
   module name to `hidden_imports` in the spec and rebuild.
-- Antivirus/SmartScreen may flag a fresh, unsigned PyInstaller `.exe` —
-  that's expected for an unsigned build, not a sign anything's wrong.
+- Antivirus/SmartScreen may flag a fresh, unsigned `.exe` (from either
+  PyInstaller or Inno Setup) — that's expected for an unsigned build, not a
+  sign anything's wrong.
+- The single-file build unpacks to a temp folder on every launch, so
+  startup is a few seconds slower than a folder-based build would be; if
+  that matters more than having one file, `dcad.spec` has the folder-build
+  alternative commented in at the bottom (swap it in, then update
+  `installer.iss`'s `[Files]`/`[Icons]` sections to point at
+  `dist\dcad\dcad.exe` and package the whole `dist\dcad\*` folder instead).
