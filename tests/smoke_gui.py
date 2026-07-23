@@ -637,6 +637,31 @@ def run():
             assert box_b.id not in window._anchored_ids
         except Exception as exc:
             errors.append(("assembly", exc))
+        QTimer.singleShot(200, step_detail)
+
+    def step_detail():
+        # Detail tab: hidden-line-removed 2D drawing views (Front/Top/
+        # Right/Isometric). do_detail_view() opens a non-modal dialog
+        # (show(), never exec()) specifically so this can't hang headless.
+        try:
+            before = len(getattr(window, "_detail_dialogs", []))
+            for view in ("front", "top", "right", "isometric"):
+                window.do_detail_view(view)
+            dialogs = window._detail_dialogs
+            assert len(dialogs) == before + 4
+            newest = dialogs[-1]
+            assert newest.view.visible_segments or newest.view.hidden_segments
+            for dialog in dialogs[before:]:
+                dialog.close()
+
+            # Empty document: refused with a message, not a crash.
+            empty_window = MainWindow()
+            with patch.object(QMessageBox, "information") as mock_info:
+                empty_window.do_detail_view("front")
+                assert mock_info.called
+            empty_window.close()
+        except Exception as exc:
+            errors.append(("detail", exc))
         QTimer.singleShot(200, step_transform)
 
     def step_transform():

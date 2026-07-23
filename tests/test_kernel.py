@@ -7,7 +7,7 @@ from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail
 from dcad.kernel.document import Document
 
 
@@ -230,6 +230,61 @@ def test_orient_edges_rejects_curved_edges():
     curved = next(e for e in all_edges(cylinder) if BRepAdaptor_Curve(e).GetType() != GeomAbs_Line)
     with pytest.raises(ValueError):
         assembly.orient_edges(cylinder, curved, straight)
+
+
+def _span(segments, axis: int) -> float:
+    coords = [p[axis] for seg in segments for p in seg]
+    return max(coords) - min(coords)
+
+
+def test_detail_project_view_front_shows_width_and_height():
+    box = primitives.make_box(3, 1, 2)  # dx=3, dy=1, dz=2
+    visible, hidden = detail.project_view([box], "front")
+    assert visible and hidden
+    assert math.isclose(_span(visible, 0), 3.0, rel_tol=1e-6)  # width (X)
+    assert math.isclose(_span(visible, 1), 2.0, rel_tol=1e-6)  # height (Z)
+
+
+def test_detail_project_view_top_shows_width_and_depth():
+    box = primitives.make_box(3, 1, 2)
+    visible, _ = detail.project_view([box], "top")
+    assert math.isclose(_span(visible, 0), 3.0, rel_tol=1e-6)  # width (X)
+    assert math.isclose(_span(visible, 1), 1.0, rel_tol=1e-6)  # depth (Y)
+
+
+def test_detail_project_view_right_shows_depth_and_height():
+    box = primitives.make_box(3, 1, 2)
+    visible, _ = detail.project_view([box], "right")
+    assert math.isclose(_span(visible, 0), 1.0, rel_tol=1e-6)  # depth (Y)
+    assert math.isclose(_span(visible, 1), 2.0, rel_tol=1e-6)  # height (Z)
+
+
+def test_detail_project_view_isometric_is_non_degenerate():
+    box = primitives.make_box(3, 1, 2)
+    visible, hidden = detail.project_view([box], "isometric")
+    assert visible
+    assert _span(visible, 0) > 0 and _span(visible, 1) > 0
+
+
+def test_detail_project_view_captures_cylinder_silhouette():
+    # A cylinder's rounded side has no sharp edge -- only the HLR
+    # "outline" (silhouette) captures it. Confirms VCompound alone
+    # wouldn't be enough and OutLineVCompound is doing real work.
+    cylinder = primitives.make_cylinder(1, 2)
+    visible, _ = detail.project_view([cylinder], "front")
+    assert math.isclose(_span(visible, 0), 2.0, rel_tol=1e-6)  # diameter
+    assert math.isclose(_span(visible, 1), 2.0, rel_tol=1e-6)  # height
+
+
+def test_detail_project_view_rejects_unknown_view():
+    box = primitives.make_box(1, 1, 1)
+    with pytest.raises(ValueError):
+        detail.project_view([box], "bottom")
+
+
+def test_detail_project_view_rejects_empty_shapes():
+    with pytest.raises(ValueError):
+        detail.project_view([], "front")
 
 
 def test_document_add_remove():

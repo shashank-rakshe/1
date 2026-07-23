@@ -420,6 +420,47 @@ def _icon_anchor():
     return c.finish()
 
 
+def _icon_view_front():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(6, 6, 16, 16))
+    p.setPen(c.accent_pen(1.4))
+    p.drawLine(_pt(6, 14), _pt(22, 14))
+    p.drawLine(_pt(14, 6), _pt(14, 22))
+    return c.finish()
+
+
+def _icon_view_top():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(4, 9, 20, 10))
+    p.setPen(c.accent_pen(1.4))
+    p.drawLine(_pt(4, 14), _pt(24, 14))
+    return c.finish()
+
+
+def _icon_view_right():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(9, 4, 10, 20))
+    p.setPen(c.accent_pen(1.4))
+    p.drawLine(_pt(14, 4), _pt(14, 24))
+    return c.finish()
+
+
+def _icon_view_iso():
+    c = _Canvas()
+    p = c.painter
+    top = QPolygonF([_pt(14, 4), _pt(23, 9), _pt(14, 14), _pt(5, 9)])
+    left = QPolygonF([_pt(5, 9), _pt(14, 14), _pt(14, 24), _pt(5, 19)])
+    right = QPolygonF([_pt(23, 9), _pt(14, 14), _pt(14, 24), _pt(23, 19)])
+    p.drawPolygon(top)
+    p.drawPolygon(left)
+    p.setPen(c.accent_pen(1.6))
+    p.drawPolygon(right)
+    return c.finish()
+
+
 _BUILDERS = {
     "select": _icon_select,
     "box": _icon_box,
@@ -460,6 +501,10 @@ _BUILDERS = {
     "align": _icon_align,
     "orient": _icon_orient,
     "anchor": _icon_anchor,
+    "view_front": _icon_view_front,
+    "view_top": _icon_view_top,
+    "view_right": _icon_view_right,
+    "view_iso": _icon_view_iso,
 }
 
 _cache = {}

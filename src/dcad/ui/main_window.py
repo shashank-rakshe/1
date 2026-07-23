@@ -18,13 +18,14 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtCore import Qt
 
 from dcad.kernel.document import Document
-from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly
+from dcad.kernel import primitives, booleans, direct_edit, io_step, transform, fillet, project_io, sketch, measure, repair, prepare, assembly, detail
 from dcad.viewport.viewport_widget import ViewportWidget
 from dcad.viewport.occt_viewer import MODE_SOLID, MODE_FACE, MODE_EDGE
 from dcad.ui.ribbon import RibbonBar
 from dcad.ui.theme import STYLESHEET
 from dcad.ui import icons
 from dcad.ui.workers import StepImportWorker
+from dcad.ui.detail_view import DetailViewDialog
 from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
 from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
 
@@ -178,6 +179,13 @@ class MainWindow(QMainWindow):
         align_group.add_action(self._tool_action("orient", "Orient", "orient"))
         fix_group_asm = assembly_tab.add_group("Fix")
         fix_group_asm.add_action(self._action("Anchor", self.toggle_anchor, "anchor"))
+
+        detail_tab = self.ribbon.add_tab("Detail")
+        views_group = detail_tab.add_group("Views")
+        views_group.add_action(self._action("Front", lambda: self.do_detail_view("front"), "view_front"))
+        views_group.add_action(self._action("Top", lambda: self.do_detail_view("top"), "view_top"))
+        views_group.add_action(self._action("Right", lambda: self.do_detail_view("right"), "view_right"))
+        views_group.add_action(self._action("Isometric", lambda: self.do_detail_view("isometric"), "view_iso"))
 
         inspect_tab = self.ribbon.add_tab("Inspect")
         measure_group = inspect_tab.add_group("Measure")
@@ -553,6 +561,28 @@ class MainWindow(QMainWindow):
         for solid in solids:
             self._add_to_scene(solid, name="Shared")
         self.statusBar().showMessage(f"Share Topology: {len(solids)} solid(s) now share topology")
+
+    # -- detail (2D hidden-line-removed drawing views) ---------------------
+    def do_detail_view(self, view: str):
+        """SpaceClaim's Detail tab: place an orthographic/isometric
+        drawing view of the model, with hidden lines shown dashed. This
+        opens a standalone window per view rather than placing views on a
+        shared drawing sheet with a title block -- that sheet-layout/
+        dimensioning layer isn't built."""
+        if not self.document.objects:
+            QMessageBox.information(self, "Detail", "The document is empty.")
+            return
+        shapes = [o.shape for o in self.document.objects]
+        try:
+            visible, hidden = detail.project_view(shapes, view)
+        except Exception as exc:
+            QMessageBox.warning(self, "Detail view failed", str(exc))
+            return
+        dialog = DetailViewDialog(f"{view.capitalize()} View", visible, hidden, self)
+        self._detail_dialogs = getattr(self, "_detail_dialogs", [])
+        self._detail_dialogs.append(dialog)
+        dialog.show()
+        self.statusBar().showMessage(f"{view.capitalize()} view: {len(visible)} visible, {len(hidden)} hidden edges")
 
     # -- sketch (rectangle/circle profile) + extrude / revolve ------------
     def _prompt_floats(self, title: str, label: str, defaults: tuple):
