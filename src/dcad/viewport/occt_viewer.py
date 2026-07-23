@@ -46,6 +46,7 @@ def _window_handle_arg(window_id: int):
     make_capsule.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p)
     return make_capsule(window_id, None, None)
 
+
 MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
 MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
 MODE_EDGE = AIS_Shape.SelectionMode_s(TopAbs_EDGE)
