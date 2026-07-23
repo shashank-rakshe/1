@@ -17,15 +17,34 @@ from OCP.BRepMesh import BRepMesh_IncrementalMesh
 
 # OCCT's native-window wrapper is a different, platform-specific class on
 # each OS -- Xw_Window (X11) only exists/works on Linux; Windows needs
-# WNT_Window instead. Never developed or run on Windows in this project
-# (this whole app was built in a Linux sandbox), so the WNT_Window
-# constructor call below is based on OCCT's documented API, not verified
-# against a real Windows OCP build -- if it's wrong, main.py's crash
-# handler will at least surface the real error instead of silence.
+# WNT_Window instead.
 if sys.platform == "win32":
     from OCP.WNT import WNT_Window as _NativeWindow
 else:
     from OCP.Xw import Xw_Window as _NativeWindow
+
+
+def _window_handle_arg(window_id: int):
+    """WNT_Window's embedding constructor (Windows only) takes the native
+    HWND as a pybind11 "capsule" (an opaque pointer wrapper), not a plain
+    int -- confirmed against a real Windows OCP build, whose exact error
+    was:
+        TypeError: __init__(): incompatible constructor arguments...
+        2. WNT_Window(theHandle: capsule, theBackColor=...)
+        Invoked with: <int>
+    ctypes.pythonapi.PyCapsule_New is the standard way to synthesize one
+    from Python without a native helper -- this is the well-known
+    workaround used by other OCCT/Qt-on-Windows projects for exactly
+    this API. Xw_Window (Linux) has no such requirement; it takes the
+    X11 window ID directly as an int."""
+    if sys.platform != "win32":
+        return window_id
+    import ctypes
+
+    make_capsule = ctypes.pythonapi.PyCapsule_New
+    make_capsule.restype = ctypes.py_object
+    make_capsule.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p)
+    return make_capsule(window_id, None, None)
 
 MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
 MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
@@ -81,7 +100,7 @@ class OcctViewer:
     def bind_window(self, window_id: int, width: int, height: int) -> None:
         self.view = self.viewer.CreateView()
         if sys.platform == "win32":
-            window = _NativeWindow(window_id)
+            window = _NativeWindow(_window_handle_arg(window_id))
         else:
             window = _NativeWindow(self.display_connection, window_id)
         if not window.IsMapped():
