@@ -1,0 +1,197 @@
+"""Thin wrapper around the OCCT 3D viewer/selection stack (no Qt here)."""
+
+import sys
+
+from OCP.Aspect import Aspect_DisplayConnection, Aspect_TypeOfTriedronPosition
+from OCP.OpenGl import OpenGl_GraphicDriver
+from OCP.V3d import V3d_Viewer, V3d_View
+from OCP.AIS import AIS_InteractiveContext, AIS_Shape
+from OCP.Quantity import Quantity_Color, Quantity_NOC_GRAY20, Quantity_NOC_BLACK
+from OCP.Graphic3d import Graphic3d_NameOfMaterial, Graphic3d_MaterialAspect
+from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE, TopAbs_EDGE
+from OCP.TopoDS import TopoDS_Shape
+from OCP.gp import gp_Ax3
+from OCP.Bnd import Bnd_Box
+from OCP.BRepBndLib import BRepBndLib
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
+
+# OCCT's native-window wrapper is a different, platform-specific class on
+# each OS -- Xw_Window (X11) only exists/works on Linux; Windows needs
+# WNT_Window instead.
+if sys.platform == "win32":
+    from OCP.WNT import WNT_Window as _NativeWindow
+else:
+    from OCP.Xw import Xw_Window as _NativeWindow
+
+
+def _window_handle_arg(window_id: int):
+    """WNT_Window's embedding constructor (Windows only) takes the native
+    HWND as a pybind11 "capsule" (an opaque pointer wrapper), not a plain
+    int -- confirmed against a real Windows OCP build, whose exact error
+    was:
+        TypeError: __init__(): incompatible constructor arguments...
+        2. WNT_Window(theHandle: capsule, theBackColor=...)
+        Invoked with: <int>
+    ctypes.pythonapi.PyCapsule_New is the standard way to synthesize one
+    from Python without a native helper -- this is the well-known
+    workaround used by other OCCT/Qt-on-Windows projects for exactly
+    this API. Xw_Window (Linux) has no such requirement; it takes the
+    X11 window ID directly as an int."""
+    if sys.platform != "win32":
+        return window_id
+    import ctypes
+
+    make_capsule = ctypes.pythonapi.PyCapsule_New
+    make_capsule.restype = ctypes.py_object
+    make_capsule.argtypes = (ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p)
+    return make_capsule(window_id, None, None)
+
+
+MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
+MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
+MODE_EDGE = AIS_Shape.SelectionMode_s(TopAbs_EDGE)
+
+PREVIEW_ID = -1
+
+# Relative-to-size tessellation: a fixed absolute deflection either wastes
+# time over-tessellating small parts or under-tessellates a huge assembly.
+# Scaling by the shape's own bounding diagonal keeps visual quality (and
+# triangle count) roughly constant regardless of model scale.
+_DEFLECTION_RATIO = 0.001
+_MIN_DEFLECTION = 1e-4
+
+
+def tessellate(shape: TopoDS_Shape) -> None:
+    """Precompute the display mesh for `shape` with parallel meshing.
+
+    AIS_Shape would otherwise tessellate lazily and serially on first
+    display; doing it explicitly here -- in parallel, with size-relative
+    deflection -- is the concrete lever that keeps large STEP assemblies
+    (thousands of faces) responsive instead of freezing the UI thread."""
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box)
+    if box.IsVoid():
+        return
+    xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+    diagonal = ((xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2) ** 0.5
+    deflection = max(diagonal * _DEFLECTION_RATIO, _MIN_DEFLECTION)
+    BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
+
+
+class OcctViewer:
+    """Owns the OCCT display connection, viewer, and interactive context.
+
+    Qt widgets bind their native window id via `bind_window()`; the widget
+    is responsible for forwarding resize/paint/input events.
+    """
+
+    def __init__(self):
+        self.display_connection = Aspect_DisplayConnection()
+        self.driver = OpenGl_GraphicDriver(self.display_connection)
+        self.viewer = V3d_Viewer(self.driver)
+        self.viewer.SetDefaultLights()
+        self.viewer.SetLightOn()
+        self.context = AIS_InteractiveContext(self.viewer)
+        self.view: V3d_View | None = None
+        self._ais_by_shape_id: dict[int, AIS_Shape] = {}
+        self._pick_mode = MODE_SOLID
+        self._sketch_plane_point = (0.0, 0.0, 0.0)
+        self._sketch_plane_normal = (0.0, 0.0, 1.0)
+
+    def bind_window(self, window_id: int, width: int, height: int) -> None:
+        self.view = self.viewer.CreateView()
+        if sys.platform == "win32":
+            window = _NativeWindow(_window_handle_arg(window_id))
+        else:
+            window = _NativeWindow(self.display_connection, window_id)
+        if not window.IsMapped():
+            window.Map()
+        self.view.SetWindow(window)
+        self.view.SetBackgroundColor(Quantity_Color(Quantity_NOC_GRAY20))
+        self.view.TriedronDisplay(Aspect_TypeOfTriedronPosition.Aspect_TOTP_LEFT_LOWER, Quantity_Color(Quantity_NOC_BLACK), 0.1)
+        self.view.MustBeResized()
+        self.view.SetProj(1, -1, 1)
+
+    def resize(self) -> None:
+        if self.view is not None:
+            self.view.MustBeResized()
+
+    def redraw(self) -> None:
+        if self.view is not None:
+            self.view.Redraw()
+
+    def fit_all(self) -> None:
+        if self.view is not None:
+            self.view.FitAll()
+            self.view.ZFitAll()
+
+    def display_shape(self, shape_id: int, shape: TopoDS_Shape, material=Graphic3d_NameOfMaterial.Graphic3d_NOM_PLASTIC) -> AIS_Shape:
+        tessellate(shape)
+        ais = AIS_Shape(shape)
+        ais.SetMaterial(Graphic3d_MaterialAspect(material))
+        self.context.Display(ais, False)
+        self.context.SetDisplayMode(ais, 1, False)
+        self.context.Deactivate(ais)
+        self.context.Activate(ais, self._pick_mode)
+        self._ais_by_shape_id[shape_id] = ais
+        return ais
+
+    def redisplay_shape(self, shape_id: int, shape: TopoDS_Shape) -> AIS_Shape:
+        self.remove_shape(shape_id)
+        return self.display_shape(shape_id, shape)
+
+    def remove_shape(self, shape_id: int) -> None:
+        ais = self._ais_by_shape_id.pop(shape_id, None)
+        if ais is not None:
+            self.context.Remove(ais, True)
+
+    def ais_for(self, shape_id: int) -> AIS_Shape | None:
+        return self._ais_by_shape_id.get(shape_id)
+
+    def clear_all(self) -> None:
+        for shape_id in list(self._ais_by_shape_id):
+            self.remove_shape(shape_id)
+
+    def set_pick_mode(self, mode: int) -> None:
+        """Switch the active selection granularity (MODE_SOLID or MODE_FACE)."""
+        if mode == self._pick_mode:
+            return
+        self._pick_mode = mode
+        for ais in self._ais_by_shape_id.values():
+            self.context.Deactivate(ais)
+            self.context.Activate(ais, mode)
+
+    def set_sketch_plane(self, plane: gp_Ax3) -> None:
+        """Set the plane that `screen_to_plane_point` projects clicks onto."""
+        loc = plane.Location()
+        direction = plane.Direction()
+        self._sketch_plane_point = (loc.X(), loc.Y(), loc.Z())
+        self._sketch_plane_normal = (direction.X(), direction.Y(), direction.Z())
+
+    def screen_to_plane_point(self, x: int, y: int) -> tuple:
+        """Project a screen pixel onto the current sketch plane, returning
+        the (X, Y, Z) world point where the view ray through that pixel
+        intersects it.
+
+        V3d_View.Convert()/ConvertToGrid() project onto an internal view
+        plane that doesn't track `Viewer.SetPrivilegedPlane()` the way its
+        docs suggest, so the sketch plane is intersected manually here
+        instead: ConvertWithProj gives a point on the pick ray plus its
+        direction, and the plane is stored explicitly by `set_sketch_plane`.
+        """
+        px, py, pz, vx, vy, vz = self.view.ConvertWithProj(x, y)
+        ox, oy, oz = self._sketch_plane_point
+        nx, ny, nz = self._sketch_plane_normal
+        denom = vx * nx + vy * ny + vz * nz
+        if abs(denom) < 1e-12:
+            return (px, py, pz)
+        t = ((ox - px) * nx + (oy - py) * ny + (oz - pz) * nz) / denom
+        return (px + t * vx, py + t * vy, pz + t * vz)
+
+    def set_preview(self, shape: TopoDS_Shape | None) -> None:
+        """Show (or clear, if `shape` is None) a temporary, non-document
+        preview shape -- used for live rubber-band feedback while sketching."""
+        if shape is None:
+            self.remove_shape(PREVIEW_ID)
+        else:
+            self.redisplay_shape(PREVIEW_ID, shape)
