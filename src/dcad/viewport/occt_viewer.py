@@ -1,10 +1,11 @@
 """Thin wrapper around the OCCT 3D viewer/selection stack (no Qt here)."""
 
+import sys
+
 from OCP.Aspect import Aspect_DisplayConnection, Aspect_TypeOfTriedronPosition
 from OCP.OpenGl import OpenGl_GraphicDriver
 from OCP.V3d import V3d_Viewer, V3d_View
 from OCP.AIS import AIS_InteractiveContext, AIS_Shape
-from OCP.Xw import Xw_Window
 from OCP.Quantity import Quantity_Color, Quantity_NOC_GRAY20, Quantity_NOC_BLACK
 from OCP.Graphic3d import Graphic3d_NameOfMaterial, Graphic3d_MaterialAspect
 from OCP.TopAbs import TopAbs_FACE, TopAbs_SHAPE, TopAbs_EDGE
@@ -13,6 +14,18 @@ from OCP.gp import gp_Ax3
 from OCP.Bnd import Bnd_Box
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
+
+# OCCT's native-window wrapper is a different, platform-specific class on
+# each OS -- Xw_Window (X11) only exists/works on Linux; Windows needs
+# WNT_Window instead. Never developed or run on Windows in this project
+# (this whole app was built in a Linux sandbox), so the WNT_Window
+# constructor call below is based on OCCT's documented API, not verified
+# against a real Windows OCP build -- if it's wrong, main.py's crash
+# handler will at least surface the real error instead of silence.
+if sys.platform == "win32":
+    from OCP.WNT import WNT_Window as _NativeWindow
+else:
+    from OCP.Xw import Xw_Window as _NativeWindow
 
 MODE_SOLID = AIS_Shape.SelectionMode_s(TopAbs_SHAPE)
 MODE_FACE = AIS_Shape.SelectionMode_s(TopAbs_FACE)
@@ -67,7 +80,10 @@ class OcctViewer:
 
     def bind_window(self, window_id: int, width: int, height: int) -> None:
         self.view = self.viewer.CreateView()
-        window = Xw_Window(self.display_connection, window_id)
+        if sys.platform == "win32":
+            window = _NativeWindow(window_id)
+        else:
+            window = _NativeWindow(self.display_connection, window_id)
         if not window.IsMapped():
             window.Map()
         self.view.SetWindow(window)
