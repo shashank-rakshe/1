@@ -115,9 +115,14 @@ SpaceClaim's artwork or branding, which are ANSYS's proprietary assets.
   angle, and bend radius. `kernel/sheet_metal.bend_allowance()` /
   `flat_length()` implement the standard K-factor bend-allowance formula
   (the flat-pattern length a bend adds) matching SpaceClaim's own Bend
-  Allowances math. **Unfold/Fold/Flatten** (walking a part's whole
-  face-adjacency graph to classify and unroll every bend) is a
-  materially bigger, separate algorithm and isn't built.
+  Allowances math. **Unfold**: same tool, same dialog, same edge pick —
+  but instead of bending, it adds the flat extension a Flange with those
+  exact parameters would need (design in flat state, fold later). This
+  is the flat-pattern inverse of Flange specifically, reusing its own
+  construction math; a general Unfold that flattens an arbitrary
+  *already-bent* part (walking its whole face-adjacency graph to
+  classify and unroll every bend) is a materially bigger, separate
+  algorithm and isn't built.
 - **Undo / Redo** — toolbar buttons or Ctrl+Z / Ctrl+Shift+Z.
 - **Open/Save STEP...** — import/export `.step`/`.stp` files (works with
   any real CAD tool, including SpaceClaim's own STEP export).
@@ -176,9 +181,9 @@ selection-aware right-click context menu, Delete, Assembly (live Align
 faces/axes and Orient edges that re-solve when the part they're anchored
 to moves, Anchor to lock a part in place), Detail (Front/Top/Right/
 Isometric hidden-line-removed 2D drawing views), and
-Sheet Metal (Flange, plus standalone bend-allowance/flat-length math).
-100 kernel tests + a full end-to-end GUI smoke test (including real
-synthesized mouse clicks) cover all of it.
+Sheet Metal (Flange, Unfold, and standalone bend-allowance/flat-length
+math). 103 kernel tests + a full end-to-end GUI smoke test (including
+real synthesized mouse clicks) cover all of it.
 
 ### Performance (large models)
 
@@ -241,12 +246,15 @@ Detail currently opens
 one hidden-line view per window with no sheet layout, title block, or
 dimensioning — real SpaceClaim places multiple views on a shared
 drawing sheet and lets you add dimension/annotation callouts; that
-sheet-layout layer isn't built. Sheet Metal currently has Flange plus the bend-allowance/flat-length
-math only — Unfold/Fold/Flatten (walking a part's whole face-adjacency
-graph to classify and unroll every bend) is a materially bigger,
-separate algorithm and isn't built. Out of scope: Facets/Mesh/Workbench (ANSYS's
-simulation pipeline) and Keyshot (a separate third-party renderer) —
-those aren't CAD modeling.
+sheet-layout layer isn't built. Sheet Metal currently has Flange and
+Unfold (the latter is the flat-pattern inverse of Flange specifically,
+not a general one) plus the bend-allowance/flat-length math. Not built
+at all: sketch constraints beyond the six wired up (Coincident/Angle
+exist in the solver but have no ribbon button), Fold/Flatten for
+already-multi-bend parts, and a general Unfold that flattens an
+arbitrary already-bent part by walking its face-adjacency graph. Out of
+scope: Facets/Mesh/Workbench (ANSYS's simulation pipeline) and Keyshot
+(a separate third-party renderer) — those aren't CAD modeling.
 
 Not possible: importing native `.scdoc` files (undocumented proprietary
 ANSYS format — no open reader exists); a Parasolid kernel (commercial,

@@ -45,6 +45,7 @@ _TOOL_MODES = {
     "align": (MODE_FACE, "Align: click the face to move, then click the face to align it to"),
     "orient": (MODE_EDGE, "Orient: click the edge to rotate, then click the edge to match its direction"),
     "flange": (MODE_EDGE, "Flange: click an edge on a thin sheet to bend a new wall from it"),
+    "unfold": (MODE_EDGE, "Unfold: click an edge to preview the flat pattern a Flange from it would need"),
 }
 
 
@@ -229,6 +230,8 @@ class MainWindow(QMainWindow):
         sheet_metal_tab = self.ribbon.add_tab("Sheet Metal")
         sheet_metal_create_group = sheet_metal_tab.add_group("Create")
         sheet_metal_create_group.add_action(self._tool_action("flange", "Flange", "flange"))
+        sheet_metal_flat_group = sheet_metal_tab.add_group("Flat")
+        sheet_metal_flat_group.add_action(self._tool_action("unfold", "Unfold", "unfold"))
 
         self.ribbon.set_current_tab(0)
 
@@ -1146,6 +1149,10 @@ class MainWindow(QMainWindow):
             if shape.ShapeType() != TopAbs_EDGE:
                 return
             self._apply_flange(obj, shape)
+        elif self.active_tool == "unfold":
+            if shape.ShapeType() != TopAbs_EDGE:
+                return
+            self._apply_unfold(obj, shape)
 
     def _apply_flange(self, obj, edge):
         """SpaceClaim's Sheet Metal > Flange: click an edge on a thin
@@ -1179,6 +1186,39 @@ class MainWindow(QMainWindow):
         self.viewport.viewer.redisplay_shape(obj.id, new_shape)
         self._sync_viewport()
         self.statusBar().showMessage(f"Added a flange to {obj.name}")
+
+    def _apply_unfold(self, obj, edge):
+        """SpaceClaim's Sheet Metal > Unfold, for the case Flange itself
+        builds: instead of an already-3D bent part flattening back out,
+        this previews the flat pattern a Flange with these same
+        parameters would need -- design in flat state, fold later. A
+        general Unfold (flattening an arbitrary already-bent part) is a
+        separate, bigger algorithm and isn't built."""
+        if not self._check_not_anchored(obj):
+            return
+        try:
+            base_face = sheet_metal.infer_base_face(obj.shape, edge)
+            outward_dir = sheet_metal.infer_outward_direction(base_face, edge)
+        except Exception as exc:
+            QMessageBox.warning(self, "Unfold failed", str(exc))
+            return
+        values = self._prompt_floats(
+            "Unfold (flat pattern of a Flange)", "Thickness, Wall Length, Angle (deg), Bend Radius:", (0.2, 1.0, 90.0, 0.2)
+        )
+        if values is None:
+            return
+        thickness, wall_length, angle_deg, bend_radius = values
+        try:
+            flat = sheet_metal.unfold_flange(base_face, edge, outward_dir, thickness, wall_length, angle_deg, bend_radius)
+            new_shape = booleans.union(obj.shape, flat)
+        except Exception as exc:
+            QMessageBox.warning(self, "Unfold failed", str(exc))
+            return
+        self.document.snapshot()
+        self.document.replace_shape(obj, new_shape)
+        self.viewport.viewer.redisplay_shape(obj.id, new_shape)
+        self._sync_viewport()
+        self.statusBar().showMessage(f"Added a flat (unfolded) pattern to {obj.name}")
 
     def _on_align_picked(self, obj, face):
         """SpaceClaim's Assembly > Align: click the face to move, then

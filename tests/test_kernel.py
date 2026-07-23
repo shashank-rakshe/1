@@ -471,6 +471,64 @@ def test_infer_and_make_flange_end_to_end():
     assert xmax > 4.0  # the flange extends past the sheet's original edge
 
 
+def test_unfold_flange_produces_a_flat_pattern_of_exact_total_length():
+    thickness = 0.2
+    wall_length = 1.0
+    angle_deg = 90.0
+    bend_radius = 0.3
+    edge_length = 4.0
+    sheet = primitives.make_box(edge_length, edge_length, thickness)
+    edge = _edge_at_x(sheet, edge_length, thickness)
+    base_face = sheet_metal.infer_base_face(sheet, edge)
+    outward = sheet_metal.infer_outward_direction(base_face, edge)
+
+    flat = sheet_metal.unfold_flange(base_face, edge, outward, thickness, wall_length, angle_deg, bend_radius)
+    full = booleans.union(sheet, flat)
+
+    # The unfolded result is genuinely flat -- no cylindrical (bend) faces.
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder
+
+    assert all(BRepAdaptor_Surface(f, True).GetType() != GeomAbs_Cylinder for f in all_faces(full))
+
+    expected_flat_length = edge_length + sheet_metal.flat_length(wall_length, bend_radius, angle_deg, thickness)
+    expected_volume = expected_flat_length * edge_length * thickness
+    assert math.isclose(volume_of(full), expected_volume, rel_tol=1e-6)
+
+
+def test_unfold_flange_volume_matches_bend_volume_at_k_factor_half():
+    # K-factor 0.5 places the neutral axis at mid-thickness, which is
+    # exactly where a bend's cross-sectional area is geometrically
+    # preserved -- so at k=0.5 (and only there) the flat pattern's volume
+    # should equal the bent flange's added volume exactly. Confirms the
+    # two tools' math is genuinely consistent, not just each internally
+    # self-referential.
+    thickness = 0.2
+    wall_length = 1.0
+    angle_deg = 70.0
+    bend_radius = 0.4
+    sheet = primitives.make_box(4, 4, thickness)
+    edge = _edge_at_x(sheet, 4.0, thickness)
+    base_face = sheet_metal.infer_base_face(sheet, edge)
+    outward = sheet_metal.infer_outward_direction(base_face, edge)
+
+    flange = sheet_metal.make_flange(base_face, edge, outward, thickness, wall_length, angle_deg, bend_radius)
+    flat = sheet_metal.unfold_flange(base_face, edge, outward, thickness, wall_length, angle_deg, bend_radius, k_factor=0.5)
+    assert math.isclose(volume_of(flange), volume_of(flat), rel_tol=1e-6)
+
+
+def test_unfold_flange_rejects_bad_dimensions():
+    from OCP.gp import gp_Dir
+
+    sheet = primitives.make_box(2, 2, 0.2)
+    face = _top_face(sheet)
+    edge = _edge_at_x(sheet, 2.0, 0.2)
+    with pytest.raises(ValueError):
+        sheet_metal.unfold_flange(face, edge, gp_Dir(1, 0, 0), -0.1, 1.0, 90.0, 0.2)
+    with pytest.raises(ValueError):
+        sheet_metal.unfold_flange(face, edge, gp_Dir(1, 0, 0), 0.1, 1.0, 200.0, 0.2)
+
+
 def test_constraint_distance_moves_free_point():
     sk = Sketch2D([(0, 0), (3, 0)])
     sk.fix(0)

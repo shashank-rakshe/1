@@ -698,6 +698,41 @@ def run():
 
             window._tool_actions["flange"].setChecked(False)
             assert window.active_tool == "select"
+
+            # Sheet Metal > Unfold: same parameters, but flat instead of
+            # bent -- on a fresh sheet (the one above is already flanged).
+            sheet_obj2 = window._add_to_scene(primitives.make_box(4, 4, thickness), name="Sheet2")
+            volume_before2 = volume_of(sheet_obj2.shape)
+            edge2 = None
+            for e in all_edges_of(sheet_obj2.shape):
+                from OCP.BRepGProp import BRepGProp
+                from OCP.GProp import GProp_GProps
+
+                props = GProp_GProps()
+                BRepGProp.LinearProperties_s(e, props)
+                c = props.CentreOfMass()
+                if math.isclose(c.X(), 4.0, abs_tol=1e-6) and math.isclose(c.Z(), thickness, abs_tol=1e-6):
+                    edge2 = e
+                    break
+            assert edge2 is not None
+
+            window._tool_actions["unfold"].setChecked(True)
+            assert window.active_tool == "unfold"
+            with patch.object(QInputDialog, "getText", return_value=("0.2, 1.0, 90, 0.3", True)):
+                window._on_picked(edge2, sheet_obj2.id)
+
+            unfolded = window.document.get(sheet_obj2.id)
+            assert volume_of(unfolded.shape) > volume_before2, "Unfold should add flat material to the sheet"
+
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            from OCP.GeomAbs import GeomAbs_Cylinder
+
+            assert all(
+                BRepAdaptor_Surface(f, True).GetType() != GeomAbs_Cylinder for f in all_faces_of(unfolded.shape)
+            ), "Unfold's result should be flat -- no bend (cylindrical) faces"
+
+            window._tool_actions["unfold"].setChecked(False)
+            assert window.active_tool == "select"
         except Exception as exc:
             errors.append(("sheet_metal", exc))
         QTimer.singleShot(200, step_sketch_constraints)

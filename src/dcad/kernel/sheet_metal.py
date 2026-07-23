@@ -1,7 +1,9 @@
-"""Sheet metal: bend-allowance math and the Flange tool (SpaceClaim's
-Sheet Metal tab). Unfold/Fold/Flatten -- walking a part's face-adjacency
-graph to classify and unroll every bend -- is a materially bigger, separate
-algorithm and isn't built yet; see the README."""
+"""Sheet metal: bend-allowance math, and the Flange/Unfold tools
+(SpaceClaim's Sheet Metal tab). Unfold here is the flat-pattern inverse
+of Flange specifically (same construction parameters, straightened out)
+-- a general Unfold that walks an arbitrary part's face-adjacency graph
+to classify and unroll every bend is a materially bigger, separate
+algorithm and isn't built; see the README."""
 
 import math
 
@@ -199,3 +201,55 @@ def make_flange(
     wall = BRepBuilderAPI_Transform(box_local, trsf, True).Shape()
 
     return booleans.union(bend, wall)
+
+
+def unfold_flange(
+    base_face: TopoDS_Face,
+    edge: TopoDS_Edge,
+    outward_dir: gp_Dir,
+    thickness: float,
+    wall_length: float,
+    angle_deg: float,
+    bend_radius: float,
+    k_factor: float = 0.33,
+) -> TopoDS_Shape:
+    """The flat-pattern equivalent of `make_flange` with the same
+    parameters: a single flat extension continuing straight from `edge`
+    in `outward_dir` instead of bending, `wall_length` plus this bend's
+    allowance long -- SpaceClaim's Sheet Metal > Unfold, for the exact
+    case Flange itself builds.
+
+    A general Unfold -- walking an arbitrary part's face-adjacency graph
+    to classify flat vs. bend faces and unroll each one -- is a separate,
+    materially bigger algorithm and isn't built; this reuses Flange's own
+    construction parameters rather than reverse-engineering them back out
+    of already-bent 3D geometry."""
+    if thickness <= 0 or wall_length <= 0 or bend_radius <= 0:
+        raise ValueError("thickness, wall_length, and bend_radius must be positive")
+    if not (0 < angle_deg <= 180):
+        raise ValueError("angle_deg must be between 0 and 180")
+
+    face_adaptor = BRepAdaptor_Surface(base_face, True)
+    if face_adaptor.GetType() != GeomAbs_Plane:
+        raise ValueError("Unfold requires a planar base face")
+    normal = _outward_normal(base_face, face_adaptor.Plane().Axis().Direction())
+    p1, p2 = _edge_endpoints(edge)
+
+    # Same start-point convention as make_flange, so the flat pattern's
+    # edge lines up exactly where the bent version's edge was.
+    axis_dir = normal.Crossed(outward_dir)
+    delta = gp_Vec(p1, p2)
+    edge_length = delta.Magnitude()
+    start_point = p1 if delta.Dot(gp_Vec(axis_dir.X(), axis_dir.Y(), axis_dir.Z())) > 0 else p2
+
+    total_length = wall_length + bend_allowance(bend_radius, angle_deg, thickness, k_factor)
+
+    # A flat box: thickness deep into -normal (matching the sheet's own
+    # material direction), edge_length wide, total_length long, starting
+    # at the sheet's edge and extending straight out along outward_dir.
+    box_local = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), total_length, edge_length, thickness).Shape()
+    from_frame = gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0))
+    to_frame = gp_Ax3(start_point, normal.Reversed(), outward_dir)
+    trsf = gp_Trsf()
+    trsf.SetDisplacement(from_frame, to_frame)
+    return BRepBuilderAPI_Transform(box_local, trsf, True).Shape()

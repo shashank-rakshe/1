@@ -471,6 +471,17 @@ def _icon_flange():
     return c.finish()
 
 
+def _icon_unfold():
+    c = _Canvas()
+    p = c.painter
+    p.drawRect(QRectF(4, 12, 10, 6))
+    p.setPen(c.accent_pen(1.8))
+    p.drawRect(QRectF(14, 12, 10, 6))
+    _arrow_head(p, _pt(13, 15), 180)
+    p.drawLine(_pt(15, 15), _pt(13, 15))
+    return c.finish()
+
+
 def _icon_constraint_horizontal():
     c = _Canvas()
     p = c.painter
@@ -578,6 +589,7 @@ _BUILDERS = {
     "view_right": _icon_view_right,
     "view_iso": _icon_view_iso,
     "flange": _icon_flange,
+    "unfold": _icon_unfold,
     "constraint_horizontal": _icon_constraint_horizontal,
     "constraint_vertical": _icon_constraint_vertical,
     "constraint_distance": _icon_constraint_distance,
