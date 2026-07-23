@@ -61,7 +61,10 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # GUI app: no terminal window
+    console=True,  # TEMP DEBUG: shows a console window with real stdout/stderr
+    # so we can see exactly what happens on startup (Qt/OCCT diagnostics,
+    # any traceback) instead of guessing from exit codes and log files.
+    # Switch back to console=False once dcad actually opens correctly.
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
