@@ -140,6 +140,15 @@ class ViewportWidget(QWidget):
 
     def _emit_pick(self):
         context = self.viewer.context
+        # HasSelectedShape()/SelectedShape() read from an internal iterator
+        # that InitSelected() must position first -- without it they always
+        # report "nothing selected" even right after a real Select() that
+        # did select something (confirmed via NbSelected()/SelectedOwner()
+        # still showing the pick). Left out, this silently breaks every
+        # click-driven tool in the app: Pull/Push, Fillet, Chamfer, Measure,
+        # Align, Orient, Flange, Unfold, Fill all dispatch through this one
+        # method, so a real mouse click never invoked any of them.
+        context.InitSelected()
         if not context.HasSelectedShape():
             self.picked.emit(None, -1)
             return

@@ -144,6 +144,117 @@ def run():
                 window._apply_pull(union_obj, planar_face)
         except Exception as exc:
             errors.append(("pull", exc))
+        QTimer.singleShot(200, step_sketch_on_face)
+
+    def step_sketch_on_face():
+        try:
+            from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+            from OCP.gp import gp_Pnt
+            from OCP.TopAbs import TopAbs_FACE
+
+            def near_origin(point) -> bool:
+                return all(math.isclose(c, 0.0, abs_tol=1e-6) for c in point)
+
+            # An off-origin box, like a real imported STEP part positioned
+            # away from the world origin -- this is the exact case that
+            # broke "sketch on it" before "sketch on face" existed: the
+            # old fixed-plane sketch tool always drew at the world origin,
+            # nowhere near a part that isn't centered there. Fit All now
+            # frames this box together with everything else already in the
+            # accumulated smoke-test scene, so rather than guess at a
+            # screen-center click, project the box's own face centroid to
+            # its exact pixel and click there.
+            off_axis_box = window._add_to_scene(BRepPrimAPI_MakeBox(gp_Pnt(50, 50, 50), 4, 4, 4).Shape(), name="OffAxisBox")
+            window.viewport.clear_selection()
+            window.viewport.fit_all()
+
+            # bind_window() fixes the camera direction via SetProj(1, -1, 1);
+            # pick whichever planar face's outward normal most directly
+            # opposes that projection vector -- i.e. whichever face is
+            # actually facing the camera -- rather than just the first
+            # planar face TopExp_Explorer happens to return, which could be
+            # a back face the click would never actually reach.
+            from dcad.kernel.direct_edit import face_outward_normal
+            from OCP.BRepGProp import BRepGProp
+            from OCP.GProp import GProp_GProps
+
+            proj = (1.0, -1.0, 1.0)
+            candidates = []
+            for f in all_faces_of(off_axis_box.shape):
+                from OCP.BRepAdaptor import BRepAdaptor_Surface
+                from OCP.GeomAbs import GeomAbs_Plane
+
+                if BRepAdaptor_Surface(f, True).GetType() != GeomAbs_Plane:
+                    continue
+                normal = face_outward_normal(f)
+                dot = normal.X() * proj[0] + normal.Y() * proj[1] + normal.Z() * proj[2]
+                candidates.append((dot, f))
+            face = min(candidates, key=lambda pair: pair[0])[1]
+
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(face, props)
+            centroid = props.CentreOfMass()
+            px, py = window.viewport.viewer.view.Convert(centroid.X(), centroid.Y(), centroid.Z())
+
+            window._tool_actions["select_face"].setChecked(True)
+            vp = window.viewport
+            assert 0 <= px < vp.width() and 0 <= py < vp.height(), (
+                f"projected face centroid {(px, py)} should land inside the {vp.width()}x{vp.height()} viewport after Fit All"
+            )
+
+            # Dispatched directly (mouseMoveEvent then press/release), not
+            # via QTest.mouseClick: this native (WA_PaintOnScreen) widget's
+            # AIS pick/select state didn't reliably update from
+            # QTest-synthesized events in this headless Xvfb environment,
+            # even though the exact same sequence works when the widget's
+            # own handlers are called directly -- matches the same
+            # native-window click reliability concern already noted above
+            # in step_mouse_interactions for Ctrl/Shift-click.
+            from PySide6.QtCore import QPointF
+            from PySide6.QtGui import QMouseEvent
+
+            pos = QPointF(px, py)
+            gpos = QPointF(vp.mapToGlobal(QPoint(px, py)))
+            vp.mouseMoveEvent(QMouseEvent(
+                QMouseEvent.Type.MouseMove, pos, gpos,
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ))
+            vp.mousePressEvent(QMouseEvent(
+                QMouseEvent.Type.MouseButtonPress, pos, gpos,
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+            ))
+            vp.mouseReleaseEvent(QMouseEvent(
+                QMouseEvent.Type.MouseButtonRelease, pos, gpos,
+                Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            ))
+
+            context = window.viewport.viewer.context
+            context.InitSelected()
+            assert context.HasSelectedShape(), "clicking the box (after Fit All) should select a face"
+            picked = context.SelectedShape()
+            assert picked.ShapeType() == TopAbs_FACE
+
+            plane = window._picked_planar_face_plane()
+            assert plane is not None, "a selected planar face should produce a sketch plane"
+            origin = plane.Location()
+            assert not near_origin((origin.X(), origin.Y(), origin.Z())), (
+                "the picked face's plane should sit on the off-axis box, not the world origin"
+            )
+
+            # Going straight from Select Face to Sketch (Extrude), matching
+            # the real intended flow: _toggle_interactive_sketch() reads
+            # the current selection before it silently (blockSignals)
+            # unchecks Select Face and switches pick mode, so the face
+            # picked above is still what it sees.
+            window.sketch_extrude_action.setChecked(True)
+            assert window.interactive_sketch_active
+            sketch_point = window.viewport.viewer._sketch_plane_point
+            assert not near_origin(sketch_point), (
+                "starting Sketch right after picking a face should sketch on that face's plane, not the world origin"
+            )
+            window.cancel_interactive_sketch()
+        except Exception as exc:
+            errors.append(("sketch_on_face", exc))
         QTimer.singleShot(200, step_fillet_chamfer)
 
     def step_fillet_chamfer():

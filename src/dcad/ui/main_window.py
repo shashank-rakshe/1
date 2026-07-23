@@ -29,7 +29,10 @@ from dcad.ui.theme import STYLESHEET
 from dcad.ui import icons
 from dcad.ui.workers import StepImportWorker
 from dcad.ui.detail_view import DetailViewDialog
-from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
+from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_REVERSED
+from OCP.TopoDS import TopoDS
+from OCP.BRepAdaptor import BRepAdaptor_Surface
+from OCP.GeomAbs import GeomAbs_Plane
 from OCP.gp import gp_Ax3, gp_Pnt, gp_Dir
 
 # Sketch entities are given temporary negative ids so they never collide
@@ -39,6 +42,7 @@ _SKETCH_TEMP_ID_BASE = -100
 
 # tool name -> (pick mode, status hint)
 _TOOL_MODES = {
+    "select_face": (MODE_FACE, "Select Face: click a face to select it, then use Sketch (Extrude/Revolve) to start a sketch on that face"),
     "pull": (MODE_FACE, "Pull/Push: click a face"),
     "fillet": (MODE_EDGE, "Fillet: click an edge"),
     "chamfer": (MODE_EDGE, "Chamfer: click an edge"),
@@ -127,6 +131,7 @@ class MainWindow(QMainWindow):
 
         select_group = design_tab.add_group("Select")
         select_group.add_action(self._action("Select", self.select_tool, "select"))
+        select_group.add_action(self._tool_action("select_face", "Select\nFace", "select"))
 
         create_group = design_tab.add_group("Create")
         create_group.add_action(self._action("Box", self.add_box, "box"))
@@ -804,9 +809,37 @@ class MainWindow(QMainWindow):
     def _current_sketch_normal(self):
         return (0.0, 0.0, 1.0) if self.interactive_sketch_finish_mode == "extrude" else (0.0, 1.0, 0.0)
 
+    def _picked_planar_face_plane(self) -> gp_Ax3 | None:
+        """SpaceClaim's "sketch on face": if a single planar face is
+        selected when Sketch (Extrude/Revolve) is clicked, the new sketch
+        starts on that face's own plane instead of always defaulting to a
+        fixed plane through the world origin -- which is only ever right
+        for something built or positioned right at the origin, not most
+        imported STEP parts (assemblies routinely place parts anywhere in
+        space)."""
+        context = self.viewport.viewer.context
+        context.InitSelected()  # HasSelectedShape()/SelectedShape() need this positioned first
+        if not context.HasSelectedShape():
+            return None
+        shape = context.SelectedShape()
+        if shape.ShapeType() != TopAbs_FACE:
+            return None
+        face = TopoDS.Face_s(shape)
+        surface = BRepAdaptor_Surface(face, True)
+        if surface.GetType() != GeomAbs_Plane:
+            return None
+        plane = surface.Plane()
+        normal = plane.Axis().Direction()
+        if face.Orientation() == TopAbs_REVERSED:
+            normal.Reverse()
+        return gp_Ax3(plane.Location(), normal)
+
     def _toggle_interactive_sketch(self, mode: str, checked: bool):
         other = self.sketch_revolve_action if mode == "extrude" else self.sketch_extrude_action
         if checked:
+            # Captured before the pick-mode switch below, which deactivates
+            # face selection.
+            face_plane = self._picked_planar_face_plane()
             other.blockSignals(True)
             other.setChecked(False)
             other.blockSignals(False)
@@ -825,8 +858,11 @@ class MainWindow(QMainWindow):
             self.interactive_sketch_profiles = []
             self._interactive_sketch_shape_ids = []
             self.viewport.sketch_mode = True
-            normal = self._current_sketch_normal()
-            self.viewport.viewer.set_sketch_plane(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(*normal)))
+            if face_plane is not None:
+                self.viewport.viewer.set_sketch_plane(face_plane)
+            else:
+                normal = self._current_sketch_normal()
+                self.viewport.viewer.set_sketch_plane(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(*normal)))
             self.sketch_entity_actions["rect"].setChecked(True)
             self.ribbon.set_current_tab(1)
             self.statusBar().showMessage(f"Sketch ({mode}): choose Line/Rectangle/Circle, then click points in the viewport")
